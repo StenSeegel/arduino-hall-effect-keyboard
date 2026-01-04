@@ -8,8 +8,8 @@ const int NUM_SWITCHES = 13;
 
 // Pin-Belegung für alle 13 Switches
 const int switchPins[NUM_SWITCHES] = {
-  2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,  // Digital Pins 2-12 (ohne 13)
-  17, 18                                 // D17 (A3), D18 (A4) als Digital
+  2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13  // Digital Pins 2-12 (ohne 13)
+  18                                 // D17 (A3), D18 (A4) als Digital
 };
 
 // Button Objekte für jeden Switch
