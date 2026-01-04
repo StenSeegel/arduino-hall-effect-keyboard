@@ -144,4 +144,92 @@ class Button {
       return state;
     }
 };
+
+/*!
+    @brief  Class for reading a resistor ladder with 4 switches.
+    @details This class provides methods for reading 4 switches connected via a resistor ladder to an analog pin.
+*/
+class LadderSwitch {
+  private:
+    uint8_t _pin;
+    int currentSwitch;
+    int lastSwitch;
+    unsigned long lastReadTime;
+    unsigned long debounceDelay;
+    
+    // ADC thresholds for 4 switches
+    int threshold1;
+    int threshold2;
+    int threshold3;
+    int threshold4;
+
+  public:
+    // Initialisierungsmethode
+    void begin(uint8_t pin, int t1 = 128, int t2 = 384, int t3 = 640, int t4 = 896) {
+      _pin = pin;
+      pinMode(_pin, INPUT);
+      currentSwitch = -1;
+      lastSwitch = -1;
+      lastReadTime = 0;
+      debounceDelay = 50;  // 50ms debounce
+      
+      // Setze ADC Schwellwerte
+      threshold1 = t1;
+      threshold2 = t2;
+      threshold3 = t3;
+      threshold4 = t4;
+    }
+
+    // Lese ADC-Wert und bestimme welcher Schalter gedrückt ist
+    int readSwitch() {
+      int adcValue = analogRead(_pin);
+      
+      if (adcValue < threshold1) {
+        return 0;  // Switch 1
+      } else if (adcValue < threshold2) {
+        return 1;  // Switch 2
+      } else if (adcValue < threshold3) {
+        return 2;  // Switch 3
+      } else if (adcValue < threshold4) {
+        return 3;  // Switch 4
+      } else {
+        return -1; // Kein Schalter gedrückt
+      }
+    }
+
+    // Gebe den aktuellen Schalter zurück mit Debouncing
+    int getSwitch() {
+      unsigned long now = millis();
+      
+      // Debounce: Nur alle 50ms auslesen
+      if (now - lastReadTime < debounceDelay) {
+        return lastSwitch;
+      }
+      lastReadTime = now;
+      
+      int switchIndex = readSwitch();
+      
+      // Nur ändern wenn sich der Schalter wirklich geändert hat
+      if (switchIndex != lastSwitch) {
+        lastSwitch = switchIndex;
+        currentSwitch = switchIndex;
+        return switchIndex;
+      }
+      
+      return -1;  // Keine Änderung
+    }
+
+    // Setze Debounce Verzögerung
+    void setDebounceDelay(unsigned long delay) {
+      debounceDelay = delay;
+    }
+
+    // Setze ADC Schwellwerte neu
+    void setThresholds(int t1, int t2, int t3, int t4) {
+      threshold1 = t1;
+      threshold2 = t2;
+      threshold3 = t3;
+      threshold4 = t4;
+    }
+};
 #endif
