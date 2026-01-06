@@ -32,8 +32,13 @@ bool additiveMode = false;          // Additive Hold: mehrere Noten gleichzeitig
 int heldNote = -1;                  // Aktuell gehaltene Note (-1 = keine) - nur für nicht-additiv
 bool heldNotes[NUM_SWITCHES];       // Array für additive Noten
 
-// Widerstandsleiter Objekt (4 Schalter an A1)
-LadderSwitch ladderSwitch;
+// Funktions-Schalter (4 Schalter an A1-A4)
+const int NUM_FUNCTION_SWITCHES = 4;
+const int functionSwitchPins[NUM_FUNCTION_SWITCHES] = {
+  A1, A2, A3, A4
+};
+Button functionSwitches[NUM_FUNCTION_SWITCHES];
+bool functionSwitchPressed[NUM_FUNCTION_SWITCHES];
 
 void setup() {
   // Alle Switch-Pins initialisieren
@@ -43,8 +48,11 @@ void setup() {
     heldNotes[i] = false;
   }
   
-  // Widerstandsleiter initialisieren
-  ladderSwitch.begin(A1);
+  // Funktions-Schalter initialisieren (A1-A4 als Digitalpins mit Pullup)
+  for (int i = 0; i < NUM_FUNCTION_SWITCHES; i++) {
+    functionSwitches[i].begin(functionSwitchPins[i]);
+    functionSwitchPressed[i] = false;
+  }
   
   // Serial Monitor starten
   Serial.begin(9600);
@@ -54,15 +62,18 @@ void setup() {
     ; // Warte auf Serial Connection (wichtig für Leonardo!)
   }
   
-  // Analog Pin für Widerstandsleiter initialisieren
-  pinMode(A1, INPUT);
+  // Analog Pins als Digital mit Pullup
+  pinMode(A1, INPUT_PULLUP);
+  pinMode(A2, INPUT_PULLUP);
+  pinMode(A3, INPUT_PULLUP);
+  pinMode(A4, INPUT_PULLUP);
   
   Serial.println("Hall-Effect Keyboard - 13 Switches");
   Serial.println("===================================");
   Serial.println("Pins: D2-D12, D17(A3), D18(A4)");
   Serial.println("Using Button library with bit-shift debouncing");
   Serial.println("Zeigt nur State Changes an");
-  Serial.println("4 Ladder Switches an A1");
+  Serial.println("4 Funktions-Schalter an A1-A4");
   Serial.println("-----------------------------------");
   
   // Debug: Zeige initiale Pin-Zustände
@@ -104,30 +115,42 @@ void decrementOctave() {
   }
 }
 
-void handleLadderSwitch() {
-  int switchIndex = ladderSwitch.getSwitch();
-  
-  // Nur verarbeiten wenn sich der Schalter geändert hat (getSwitch() gibt -1 zurück wenn keine Änderung)
-  if (switchIndex >= 0) {
-    Serial.print("Ladder Switch ");
-    Serial.print(switchIndex + 1);
-    Serial.println(" PRESSED");
+// Verarbeite Funktions-Schalter
+void handleFunctionSwitches() {
+  for (int i = 0; i < NUM_FUNCTION_SWITCHES; i++) {
     
-    // Hier können Funktionen für die 4 Schalter aufgerufen werden
-    // z.B. toggleHoldMode(), toggleAdditiveMode(), etc.
-    switch(switchIndex) {
-      case 0:  // Schalter 1
-        // toggleHoldMode();
-        break;
-      case 1:  // Schalter 2
-        // toggleAdditiveMode();
-        break;
-      case 2:  // Schalter 3
-        // incrementOctave();
-        break;
-      case 3:  // Schalter 4
-        // decrementOctave();
-        break;
+    // Trigger gibt nur einmal true beim Drücken zurück (wenn Pin LOW wird)
+    if (functionSwitches[i].trigger()) {
+      // Schalter wurde gerade gedrückt
+      functionSwitchPressed[i] = true;
+      
+      Serial.print("Function Switch ");
+      Serial.print(i + 1);
+      Serial.println(" PRESSED");
+      
+      // Führe entsprechende Aktion aus
+      switch(i) {
+        case 0:  // Schalter 1 (A1)
+          toggleHoldMode();
+          break;
+        case 1:  // Schalter 2 (A2)
+          toggleAdditiveMode();
+          break;
+        case 2:  // Schalter 3 (A3)
+          decrementOctave();
+          break;
+        case 3:  // Schalter 4 (A4)
+          incrementOctave();
+          break;
+      }
+    }
+    
+    // Prüfe ob Schalter losgelassen wurde
+    if (functionSwitchPressed[i] && digitalRead(functionSwitchPins[i]) == HIGH) {
+      functionSwitchPressed[i] = false;
+      Serial.print("Function Switch ");
+      Serial.print(i + 1);
+      Serial.println(" RELEASED");
     }
   }
 }
@@ -266,6 +289,6 @@ void loop() {
     }
   }
   
-  // Verarbeite Widerstandsleiter-Schalter
-  handleLadderSwitch();
+  // Verarbeite Funktions-Schalter (A1-A4)
+  handleFunctionSwitches();
 }
