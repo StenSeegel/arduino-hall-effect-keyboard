@@ -26,8 +26,7 @@ Die Funktionstasten verwenden ein **Hauptmenü/Submenu-System**:
 
 #### Submenu-System (Long Press)
 **Aktivierung**: Langes Drücken einer Funktionstaste öffnet das entsprechende Submenu
-- **LED 8 leuchtet** in der Submenu-Farbe (``Index-Palette``)
-- **Weiße LEDs** zeigen den aktuell gewählten Index an
+- **Aktuelle Auswahl**: LED entsprechend dem gewählten Index leuchtet in ``Index-Palette`` Farbe
 - **Navigation**: FS3/FS4 zum Blättern durch Optionen
 - **Beenden**: FS1 (Cancel) oder FS2 (Save & Apply)
 
@@ -40,8 +39,7 @@ Das **LED-System** arbeitet mit zwei verschiedenen Modi:
 
 - **LED 1**: Play Mode Status
 - **LED 2**: Chord Mode Status  
-- **LEDs 3-7**: Weitere Modi-Anzeigen
-- **LED 8**: Submenu-Indikator (leuchtet in ``Index-Palette`` Farbe entsprechend dem Submenu Index)
+- **LEDs 3-8**: Weitere Modi-Anzeigen
 
 **LED-Farben**:
 - **Option Index** korrespondiert mit Farbe der ``Index-Palette`` (nur im Controller-Modus)
@@ -67,36 +65,46 @@ Das **LED-System** arbeitet mit zwei verschiedenen Modi:
 
 #### Play Mode (FS1)
 **Short Press**: Aktiviert/Deaktiviert aktuellen Play Mode
-**Long Press**: Öffnet Submenu 1 (LED 8 leuchtet in Index 1 Farbe aus ``Index-Palette``)
+**Long Press**: Öffnet Submenu 1
 
 **Submenu 1 - Play Mode Optionen:**
-- **Index 1** (LED 1): **Hold** - Noten bleiben aktiv nach Loslassen, neue Note führt zum Release der alten
-- **Index 2** (LED 2): **Hold + Additive** - Mehrere Noten gleichzeitig halten, Noten können sich nur selbst loslassen (Release)
+- **Index 0** (LED 0): **Hold** - Noten bleiben aktiv nach Loslassen, neue Note führt zum Release der alten
+- **Index 1** (LED 1): **Hold + Additive** - Mehrere Noten gleichzeitig halten, Noten können sich nur selbst loslassen (Release)
 
 **LED 1 Status-Anzeige:**
 - **Aus**: Kein Modus aktiv
-- **Index 1 Farbe**: Hold-Modus aktiv  
-- **Index 2 Farbe **: Hold + Additive-Modus aktiv
+- **Index 0 Farbe**: Hold-Modus aktiv  
+- **Index 1 Farbe**: Hold + Additive-Modus aktiv
 
 #### Chord Mode (FS2) 
 **Short Press**: Aktiviert/Deaktiviert Chord-Modus
-**Long Press**: Öffnet Submenu 2 (LED 8 leuchtet in Index 2 Farbe aus ``Index-Palette``)
+**Long Press**: Öffnet Submenu 2
 
 **Root Note Auswahl:**
 - **Note Switches**: Betätigung eines Note Switches setzt neue Root Note (Zugehörige LED blinkt 3x 300ms zur Bestätigung - Standard für Note-Tasten Settings)
 
 **Scale Type Auswahl:**
-- **Index 1** (LED 1 in Index-Palette Farbe): **Major** - Tasten spielen diatonische Akkorde für Major Scale, nicht-diatonische Töne werden deaktiviert
-- **Index 2** (LED 2 in Index-Palette Farbe): **Minor** - Tasten spielen diatonische Akkorde für Minor Scale, nicht-diatonische Töne werden deaktiviert  
-- **Index 3** (LED 3 in Index-Palette Farbe): **Power 5** - Alle Tasten spielen Power 5 Akkorde
-- **Index 4** (LED 4 in Index-Palette Farbe): **Power 8** - Alle Tasten spielen Power 8 Akkorde
+- **Index 0** (LED 0 in Index-Palette Farbe): **Major** - Tasten spielen diatonische Akkorde für Major Scale, nicht-diatonische Töne werden deaktiviert
+- **Index 1** (LED 1 in Index-Palette Farbe): **Dorian** - Diatonische Akkorde für Dorian Modus
+- **Index 2** (LED 2 in Index-Palette Farbe): **Phrygian** - Diatonische Akkorde für Phrygian Modus  
+- **Index 3** (LED 3 in Index-Palette Farbe): **Lydian** - Diatonische Akkorde für Lydian Modus
+- **Index 4** (LED 4 in Index-Palette Farbe): **Mixolydian** - Diatonische Akkorde für Mixolydian Modus
+- **Index 5** (LED 5 in Index-Palette Farbe): **Minor** - Tasten spielen diatonische Akkorde für Minor Scale, nicht-diatonische Töne werden deaktiviert
+- **Index 6** (LED 6 in Index-Palette Farbe): **Locrian** - Diatonische Akkorde für Locrian Modus
+- **Index 7** (LED 7 in Index-Palette Farbe): **Power 5** - Alle Tasten spielen Power 5 Akkorde
+- **Index 8** (LED 8 in Index-Palette Farbe): **Power 8** - Alle Tasten spielen Power 8 Akkorde
 
 **LED 2 Status-Anzeige:**
 - **Aus**: Kein Chord Mode aktiv
-- **Index 1 Farbe**: Major Scale aktiv
-- **Index 2 Farbe **: Minor Scale aktiv
-- **Index 3 Farbe**: Power 5 Scale aktiv
-- **Index 4 Farbe **: Power 8 Scale aktiv
+- **Index 0 Farbe**: Major Scale aktiv
+- **Index 1 Farbe**: Dorian Mode aktiv
+- **Index 2 Farbe**: Phrygian Mode aktiv
+- **Index 3 Farbe**: Lydian Mode aktiv
+- **Index 4 Farbe**: Mixolydian Mode aktiv
+- **Index 5 Farbe**: Minor Scale aktiv
+- **Index 6 Farbe**: Locrian Mode aktiv
+- **Index 7 Farbe**: Power 5 Scale aktiv
+- **Index 8 Farbe**: Power 8 Scale aktiv
 
 #### Oktavierung (FS3/FS4)
 **Short Press**: 
@@ -116,8 +124,7 @@ Das **LED-System** arbeitet mit zwei verschiedenen Modi:
 - **FS2**: Save & Apply (Speichert Auswahl und kehrt zurück)
 
 **Visuelle Anzeigen:**
-- **LED 8**: leuchtet in ``Index-Palette`` Farbe entsprechend dem aktiven Submenu / in Hauptmenu aus
-- **LEDs**: Zeigen aktuell gewählten Index in ``Index-Palette`` Farben
+- **LED**: Zeigt aktuell gewählten Index in ``Index-Palette`` Farbe
 
 ### Standard-Spielmodi
 
@@ -148,10 +155,15 @@ Das System generiert automatisch diatonisch korrekte Akkorde basierend auf:
 - **Scale Type** (Skalentyp) - gesteuert über Submenu 2 Index-Optionen
 
 #### Scale Types (Submenu 2 Index-Optionen)
-- **Index 1**: **Major** - Diatonische Akkorde basierend auf Major Scale Pattern
-- **Index 2**: **Minor** - Diatonische Akkorde basierend auf Minor Scale Pattern
-- **Index 3**: **Power 5** - Alle Tasten spielen Power 5 Akkorde
-- **Index 4**: **Power 8** - Alle Tasten spielen Power 8 Akkorde
+- **Index 0**: **Ionian (Major)** - Diatonische Akkorde basierend auf Major Scale Pattern
+- **Index 1**: **Dorian** - Diatonische Akkorde basierend auf Dorian Mode Pattern
+- **Index 2**: **Phrygian** - Diatonische Akkorde basierend auf Phrygian Mode Pattern  
+- **Index 3**: **Lydian** - Diatonische Akkorde basierend auf Lydian Mode Pattern
+- **Index 4**: **Mixolydian** - Diatonische Akkorde basierend auf Mixolydian Mode Pattern
+- **Index 5**: **Aeolian (Minor)** - Diatonische Akkorde basierend auf Minor Scale Pattern
+- **Index 6**: **Locrian** - Diatonische Akkorde basierend auf Locrian Mode Pattern
+- **Index 7**: **Power 5** - Alle Tasten spielen Power 5 Akkorde
+- **Index 8**: **Power 8** - Alle Tasten spielen Power 8 Akkorde
 
 #### Diatonische Muster
 

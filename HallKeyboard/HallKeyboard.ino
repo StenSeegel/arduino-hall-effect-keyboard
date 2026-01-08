@@ -146,9 +146,41 @@ const int chordDefinitions[7][3] = {
   {0, 3, 6}     // 6 = Diminished
 };
 
-// Diatonisches Muster (nur eins nötig - Minor wird durch Index-Verschiebung erzielt)
+// Diatonische Akkord-Muster für alle 7 Modi
 // Index 0-6 entspricht den Stufen der Tonleiter (I-VII)
-const int diatonicPattern[7] = {0, 1, 1, 0, 0, 1, 6};  // Major, minor, minor, Major, Major, minor, Dim
+// Das Pattern ist basierend auf der Dur-Tonleiter: Major, minor, minor, Major, Major, minor, Diminished
+// und wird mit (diatonicDegree + scaleType) % 7 für jeden Modus neu indexiert
+const int diatonicChordPattern[7] = {0, 1, 1, 0, 0, 1, 6};  // Major, minor, minor, Major, Major, minor, Dim
+
+// Alle 7 Modi mit ihren genauen Semitone-Intervallen (relativ zur Root Note)
+// Index 0 = Ionian (Major/Dur-Tonleiter)
+const int modeIntervals[7][7] = {
+  {0, 2, 4, 5, 7, 9, 11},  // 0: Ionian (Major/Dur)
+  {0, 2, 3, 5, 7, 9, 10},  // 1: Dorian
+  {0, 1, 3, 5, 7, 8, 10},  // 2: Phrygian
+  {0, 2, 4, 6, 7, 9, 11},  // 3: Lydian
+  {0, 2, 4, 5, 7, 9, 10},  // 4: Mixolydian
+  {0, 2, 3, 5, 7, 8, 10},  // 5: Aeolian (Natural Minor)
+  {0, 1, 3, 5, 6, 8, 10}   // 6: Locrian
+};
+
+// Hilfsfunktion um zu prüfen ob eine Note in der diatonischen Tonleiter ist (mit Index-Verschiebung für Modi)
+bool isDiatonicNote(int switchIndex) {
+  int noteOffset = (midiNotes[switchIndex] - diatonicRootKey + 12) % 12;
+  
+  if (scaleType >= 0 && scaleType <= 6) {
+    // Verwende das exakte Modus-Intervall Array für den aktuellen Modus
+    for (int i = 0; i < 7; i++) {
+      if (noteOffset == modeIntervals[scaleType][i]) {
+        return true;
+      }
+    }
+    return false;
+  }
+  
+  // Für Power Modes alle Noten erlauben
+  return true;
+}
 
 // Hilfsfunktion um diatonischen Akkordtyp zu berechnen
 // switchIndex: 0-12 (C bis C)
@@ -156,27 +188,28 @@ const int diatonicPattern[7] = {0, 1, 1, 0, 0, 1, 6};  // Major, minor, minor, M
 int getDiatonicChordType(int switchIndex) {
   // Berechne den Abstand vom Root Key
   int noteOffset = (midiNotes[switchIndex] - diatonicRootKey + 12) % 12;
-  // Bestimme die Stufe (0-6) in der diatonischen Tonleiter
-  // C-Dur-Tonleiter: C D E F G A B (0, 2, 4, 5, 7, 9, 11)
-  int diatonicDegree = -1;
   
-  if (noteOffset == 0) diatonicDegree = 0;  // I
-  else if (noteOffset == 2) diatonicDegree = 1;  // ii
-  else if (noteOffset == 4) diatonicDegree = 2;  // iii
-  else if (noteOffset == 5) diatonicDegree = 3;  // IV
-  else if (noteOffset == 7) diatonicDegree = 4;  // V
-  else if (noteOffset == 9) diatonicDegree = 5;  // vi
-  else if (noteOffset == 11) diatonicDegree = 6; // vii°
-  else {
-    // Schwarze Taste - verwende Major als Default
+  // Bestimme die diatonische Stufe (0-6) durch Suche im exakten Modus-Intervall Array
+  int diatonicDegree = -1;
+  for (int i = 0; i < 7; i++) {
+    // Verwende das exakte Modus-Intervall Array für den aktuellen Modus
+    if (noteOffset == modeIntervals[scaleType][i]) {
+      diatonicDegree = i;
+      break;
+    }
+  }
+  
+  if (diatonicDegree == -1) {
+    // Nicht-diatonische Note - verwende Major als Default
     return 0;
   }
   
   // Gebe den Akkordtyp basierend auf dem Muster zurück
+  // Der Akkordtyp wird durch (diatonicDegree + scaleType) % 7 bestimmt
+  // Das ergibt automatisch den richtigen Akkordtyp für den Modus
   if (scaleType >= 0 && scaleType <= 6) {
-    // Verwende Index-Verschiebung für alle 7 diatonischen Modi
     int modalIndex = (diatonicDegree + scaleType) % 7;
-    return diatonicPattern[modalIndex];
+    return diatonicChordPattern[modalIndex];
   } else {
     // Fallback für nicht-diatonische Modi
     return 0; // Major
@@ -212,20 +245,159 @@ int getChordNote(int switchIndex, int variationType, int noteIndex) {
 
 bool chordNotesActive[NUM_SWITCHES];  // Speichert ob Akkord-Noten für einen Switch aktiv sind
 
-// Hilfsfunktion um zu prüfen ob eine Note in der diatonischen Tonleiter ist
-bool isDiatonicNote(int switchIndex) {
-  int noteOffset = (midiNotes[switchIndex] - diatonicRootKey + 12) % 12;
-  
-  if (scaleType >= 0 && scaleType <= 6) {
-    // Alle diatonischen Modi verwenden dieselben 7 Töne
-    // C-Dur-Tonleiter: C D E F G A B (0, 2, 4, 5, 7, 9, 11)
-    return (noteOffset == 0 || noteOffset == 2 || noteOffset == 4 || 
-            noteOffset == 5 || noteOffset == 7 || noteOffset == 9 || noteOffset == 11);
+// Submenu-System Variablen
+bool inSubmenu = false;              // Flag ob wir aktuell in einem Submenu sind
+int currentSubmenu = 0;              // Welches Submenu aktiv ist (1-4)
+int submenuIndex = 0;                // Aktueller Index im Submenu
+int maxSubmenuIndex = 0;             // Max Index für aktuelles Submenu
+bool submenuChanged = false;         // Flag ob Submenu-Status geändert wurde
+
+// Play Mode Variablen (für Submenu 1)
+int playModeType = 0;                // 0=Hold, 1=Hold+Additive (Default: Hold)
+bool playModeActive = false;         // Flag ob Play Mode aktiv ist
+#define PLAY_MODE_HOLD 0
+#define PLAY_MODE_ADDITIVE 1
+
+// Chord Mode Variablen
+bool chordModeActive = false;        // Flag ob Chord Mode aktiv ist
+
+// LED Modi
+bool ledControllerMode = true;       // true=Controller-Modus, false=Noten-Modus
+bool isIdle = true;                  // true=Zeige Controller LEDs, false=Zeige nur Noten LEDs
+
+// MIDI Note Tracking - verfolgt welche MIDI-Noten gerade aktiv sind
+bool activeMidiNotes[128];           // Array für alle möglichen MIDI-Noten (0-127)
+
+// Timing für LED-Blinken
+unsigned long lastBlinkTime = 0;
+int blinkCounter = 0;
+bool blinkState = false;
+int confirmationSwitchIndex = -1;    // Welcher Switch bestätigt werden soll
+
+// Oktave-LED Anzeige Timing
+bool octaveLEDActive = false;
+unsigned long octaveLEDStartTime = 0;
+const unsigned long OCTAVE_LED_DURATION = 800;  // 0.8 Sekunden anzeigen
+
+// LED-Bestätigungs-Blinken (3x 300ms)
+void confirmLED(int switchIndex) {
+  confirmationSwitchIndex = switchIndex;
+  blinkCounter = 0;
+  blinkState = false;
+  lastBlinkTime = millis();
+}
+
+// Update LED-Bestätigungs-Blinken (wird in loop() aufgerufen)
+void updateConfirmationBlink() {
+  if (confirmationSwitchIndex >= 0) {
+    unsigned long currentTime = millis();
+    if (currentTime - lastBlinkTime >= 300) {
+      lastBlinkTime = currentTime;
+      int ledIndex = ledMapping[confirmationSwitchIndex];
+      
+      if (blinkState) {
+        pixels.setPixelColor(ledIndex, pixels.Color(0, 0, 0));
+        blinkCounter++;
+        if (blinkCounter >= 3) {
+          confirmationSwitchIndex = -1;
+        }
+      } else {
+        // Nutze Index-Palette Farbe für Bestätigung
+        pixels.setPixelColor(ledIndex, INDEX_PALETTE[0]); // Rot
+      }
+      blinkState = !blinkState;
+      pixels.show();
+    }
+  }
+}
+
+// Hilfsfunktion zum Deaktivieren der Controller-LEDs bei Noten-Events
+void disableControllerLEDsForNotes() {
+  if (isIdle) {
+    isIdle = false;
+    pixels.clear();
+    pixels.show();
+  }
+}
+
+// Einfache Idle-Status Verwaltung
+void updateIdleStatus() {
+  // Prüfe Oktave-LED Timeout
+  if (octaveLEDActive && millis() - octaveLEDStartTime >= OCTAVE_LED_DURATION) {
+    octaveLEDActive = false;
   }
   
-  // Für Power Modes alle Noten erlauben
-  return true;
+  // Wenn nicht idle, prüfe ob wir zu idle wechseln können
+  if (!isIdle) {
+    bool hasActivity = false;
+    
+    // Prüfe MIDI-Noten Aktivität (das ist was wirklich zählt!)
+    for (int i = 0; i < 128; i++) {
+      if (activeMidiNotes[i]) {
+        hasActivity = true;
+        break;
+      }
+    }
+    
+    // Prüfe auch aktuell gedrückte Switches (für sofortige Reaktion)
+    if (!hasActivity) {
+      for (int i = 0; i < NUM_SWITCHES; i++) {
+        if (switches[i].isDown()) {
+          hasActivity = true;
+          break;
+        }
+      }
+    }
+    
+    // Prüfe auch Confirmation und Oktave LEDs
+    if (confirmationSwitchIndex >= 0 || octaveLEDActive) {
+      hasActivity = true;
+    }
+    
+    // Wenn keine Aktivität, zurück zu idle
+    if (!hasActivity) {
+      isIdle = true;
+      updateControllerLEDs();
+    }
+  }
 }
+
+// Controller-Modus LED Anzeige
+void updateControllerLEDs() {
+  if (!isIdle) return;  // Nur anzeigen wenn idle
+  
+  pixels.clear();
+  
+  // Zeige Status LEDs nur wenn wir NICHT im Submenu sind
+  if (!inSubmenu) {
+    // LED 1: Play Mode Status
+    if (playModeActive) {
+      pixels.setPixelColor(0, INDEX_PALETTE[playModeType % 8]);
+    }
+    
+    // LED 2: Chord Mode Status  
+    if (chordModeActive && chordModeType > 0) {
+      pixels.setPixelColor(1, INDEX_PALETTE[scaleType % 8]);
+    }
+  } else {
+    // LED 8: Submenu-Indikator
+    pixels.setPixelColor(7, INDEX_PALETTE[currentSubmenu - 1]);
+    // Zeige aktuellen Index in Submenu
+    if (submenuIndex >= 0 && submenuIndex < 8) {
+      pixels.setPixelColor(submenuIndex, INDEX_PALETTE[submenuIndex % 8]);
+    }
+  }
+  
+  pixels.show();
+}
+
+// Forward-Deklarationen
+void handleShortPress(int fsNumber);
+void enterSubmenu(int submenuNumber);
+void exitSubmenu(bool saveChanges);
+void togglePlayMode();
+void togglePlayModeOnOff();
+void toggleChordModeOnOff();
 
 // Funktions-Schalter (4 Schalter an A1-A4)
 const int NUM_FUNCTION_SWITCHES = 4;
@@ -234,6 +406,7 @@ const int functionSwitchPins[NUM_FUNCTION_SWITCHES] = {
 };
 Button functionSwitches[NUM_FUNCTION_SWITCHES];
 unsigned long functionSwitchPressTime[NUM_FUNCTION_SWITCHES];  // Zeit beim Drücken speichern
+bool functionSwitchLongPressed[NUM_FUNCTION_SWITCHES];         // Flag für Long-Press Erkennung
 const unsigned long LONG_PRESS_DURATION = 1000;  // 1 Sekunde für Long-Press
 
 void setup() {
@@ -252,11 +425,17 @@ void setup() {
   // Funktions-Schalter initialisieren (A1-A4 als Digitalpins mit Pullup)
   for (int i = 0; i < NUM_FUNCTION_SWITCHES; i++) {
     functionSwitches[i].begin(functionSwitchPins[i]);
+    functionSwitchLongPressed[i] = false;
   }
   
   // Akkord-Mode Array initialisieren
   for (int i = 0; i < NUM_SWITCHES; i++) {
     chordNotesActive[i] = false;
+  }
+  
+  // MIDI-Note-Tracking initialisieren
+  for (int i = 0; i < 128; i++) {
+    activeMidiNotes[i] = false;
   }
   
   // WS2812 LEDs initialisieren
@@ -275,14 +454,6 @@ void setup() {
     ; // Warte kurz auf Serial Connection
   }
   
-  Serial.println("Hall-Effect Keyboard - 13 Switches");
-  Serial.println("===================================");
-  Serial.println("Pins: D2-D12, D17(A3), D18(A4)");
-  Serial.println("Using Button library with bit-shift debouncing and state management");
-  Serial.println("Zeigt nur State Changes an");
-  Serial.println("4 Funktions-Schalter an A1-A4");
-  Serial.println("8 WS2812 LEDs an A5");
-  Serial.println("-----------------------------------");
   
   // Debug: Zeige initiale Pin-Zustände
   Serial.println("\nInitiale Pin-Zustände:");
@@ -303,6 +474,18 @@ void setup() {
 
 // MIDI Note On/Off Funktion
 void noteOn(int cmd, int pitch, int velocity) {
+  // Verfolge MIDI-Noten Status
+  if (pitch >= 0 && pitch < 128) {
+    if (velocity > 0) {
+      // Note On
+      activeMidiNotes[pitch] = true;
+      disableControllerLEDsForNotes();
+    } else {
+      // Note Off
+      activeMidiNotes[pitch] = false;
+    }
+  }
+  
   Serial1.write(cmd);
   Serial1.write(pitch);
   Serial1.write(velocity);
@@ -407,6 +590,22 @@ void setLED(int switchIndex, bool on) {
       } else {
         // Keine andere Taste auf dieser LED, LED ausschalten
         pixels.setPixelColor(ledIndex, pixels.Color(0, 0, 0));
+        
+        // Prüfe sofort ob zurück in Controller-Modus gewechselt werden soll
+        bool hasActiveNotes = false;
+        for (int i = 0; i < NUM_SWITCHES; i++) {
+          if (heldNotes[i] || chordNotesActive[i] || switches[i].isDown()) {
+            hasActiveNotes = true;
+            break;
+          }
+        }
+        
+        // Wenn keine Noten mehr aktiv und nicht bereits im Controller-Modus
+        if (!hasActiveNotes && !ledControllerMode && confirmationSwitchIndex < 0 && !octaveLEDActive) {
+          ledControllerMode = true;
+          // Verzögere Controller-LED Update minimal um flackern zu vermeiden
+          updateControllerLEDs();
+        }
       }
     }
     pixels.show();
@@ -416,6 +615,11 @@ void setLED(int switchIndex, bool on) {
 // LED-Anzeige für Oktave-Wechsel (LED 1-8 entspricht Oktave 0-7)
 void showOctaveLED(int octave) {
   if (octave < 0 || octave > 7) return;  // Gültige Oktaven: 0-7
+  
+  // Aktiviere Oktave-LED Anzeige
+  octaveLEDActive = true;
+  octaveLEDStartTime = millis();
+  isIdle = false;  // Nicht idle während Oktave-Anzeige
   
   // Alle LEDs ausschalten
   pixels.clear();
@@ -472,134 +676,110 @@ void toggleChordMode() {
   }
 }
 
-// Spiele Akkord mit Octave Folding (Töne werden in der Range gehalten)
-void playChordFolded(int switchIndex, bool on) {
-  // Bei diatonischen Modi (0-6): Prüfe ob Note diatonisch ist
-  if (scaleType >= 0 && scaleType <= 6 && !isDiatonicNote(switchIndex)) {
-    // Nicht-diatonische Note - ignorieren oder LED ausschalten
-    if (on) {
-      // Visueller Hinweis: LED kurz rot blinken für deaktivierte Note
-      int ledIndex = ledMapping[switchIndex];
-      pixels.setPixelColor(ledIndex, pixels.Color(0, 20, 0)); // Rot
-      pixels.show();
-      delay(100);
-      pixels.setPixelColor(ledIndex, pixels.Color(0, 0, 0)); // Aus
-      pixels.show();
-    }
-    return; // Beende Funktion ohne Akkord zu spielen
-  }
-  
-  // Berechne die Basis-MIDI-Note für diesen Switch
+// Helper-Funktion um Akkordnoten abzuschalten mit LED-Management
+void turnOffChordNotes(int switchIndex, bool isFolded) {
   int baseNote = midiNotes[switchIndex] + (currentOctave * 12);
   
-  if (!on) {
-    // Akkord ausschalten
-    for (int j = 0; j < maxChordNotes; j++) {
-      int noteOffset = getChordNote(switchIndex, scaleType, j);
-      if (noteOffset >= 0) {  // Nur wenn Note definiert (>= 0)
-        int chordNote = baseNote + noteOffset;  // Addiere Semitone zur Basis-Note
-        
-        // Falte die Note in die Range: currentOctave*12 bis (currentOctave+1)*12
-        while (chordNote > (currentOctave + 1) * 12) {
-          chordNote -= 12;  // Eine Oktave nach unten
-        }
-        while (chordNote < currentOctave * 12) {
-          chordNote += 12;  // Eine Oktave nach oben
-        }
-        
-        noteOn(0x90, chordNote, 0x00);  // Note Off
-        
-        // Berechne LED-Index für die gefaltete Note und schalte sie aus
-        int displaySwitchIndex;
-        if (chordNote == (currentOctave + 1) * 12) {
-          displaySwitchIndex = 12;
-        } else {
-          displaySwitchIndex = chordNote % 12;
-        }
-        if (displaySwitchIndex >= 0 && displaySwitchIndex < NUM_SWITCHES) {
-          bool ledStillActive = false;
-          for (int i = 0; i < NUM_SWITCHES; i++) {
-            if (i != switchIndex && chordNotesActive[i]) {
-              for (int k = 0; k < maxChordNotes; k++) {
-                int offset = getChordNote(i, scaleType, k);
-                if (offset >= 0) {
-                  int otherNote = midiNotes[i] + (currentOctave * 12) + offset;
-                  while (otherNote > (currentOctave + 1) * 12) {
-                    otherNote -= 12;
-                  }
-                  while (otherNote < currentOctave * 12) {
-                    otherNote += 12;
-                  }
-                  int otherDisplayIndex = otherNote % 12;
-                  if (otherDisplayIndex == displaySwitchIndex) {
-                    ledStillActive = true;
-                    break;
-                  }
+  for (int j = 0; j < maxChordNotes; j++) {
+    int noteOffset = getChordNote(switchIndex, scaleType, j);
+    if (noteOffset >= 0) {
+      int chordNote = baseNote + noteOffset;
+      
+      // Falte/passe Note an je nach Modus
+      if (isFolded) {
+        while (chordNote > (currentOctave + 1) * 12) chordNote -= 12;
+        while (chordNote < currentOctave * 12) chordNote += 12;
+      }
+      
+      noteOn(0x90, chordNote, 0x00);  // Note Off
+      
+      // Berechne Display-Index
+      int displaySwitchIndex = (chordNote == (currentOctave + 1) * 12) ? 12 : (chordNote % 12);
+      
+      if (displaySwitchIndex >= 0 && displaySwitchIndex < NUM_SWITCHES) {
+        // Prüfe ob andere Akkorde diese LED steuern
+        bool ledStillActive = false;
+        for (int i = 0; i < NUM_SWITCHES; i++) {
+          if (i != switchIndex && chordNotesActive[i]) {
+            for (int k = 0; k < maxChordNotes; k++) {
+              int offset = getChordNote(i, scaleType, k);
+              if (offset >= 0) {
+                int otherNote = midiNotes[i] + (currentOctave * 12) + offset;
+                if (isFolded) {
+                  while (otherNote > (currentOctave + 1) * 12) otherNote -= 12;
+                  while (otherNote < currentOctave * 12) otherNote += 12;
+                }
+                int otherDisplayIndex = (otherNote == (currentOctave + 1) * 12) ? 12 : (otherNote % 12);
+                if (otherDisplayIndex == displaySwitchIndex) {
+                  ledStillActive = true;
+                  break;
                 }
               }
-              if (ledStillActive) break;
             }
-          }
-          
-          if (!ledStillActive) {
-            setLEDWithColor(displaySwitchIndex, false);
+            if (ledStillActive) break;
           }
         }
+        if (!ledStillActive) setLEDWithColor(displaySwitchIndex, false);
       }
     }
+  }
+}
+
+// Helper-Funktion um Akkordnoten anzuschalten mit LED-Ansteuerung
+void turnOnChordNotes(int switchIndex, bool isFolded) {
+  int baseNote = midiNotes[switchIndex] + (currentOctave * 12);
+  
+  // Bestimme Akkordtyp
+  int chordDefIndex;
+  if (scaleType >= 0 && scaleType <= 6) {
+    chordDefIndex = getDiatonicChordType(switchIndex);
+  } else if (scaleType == 7) {
+    chordDefIndex = 2;  // Power 5
   } else {
-    // Akkord anschalten
-    int chordDefIndex;
-    if (scaleType == 0) {
-      diatonicIsMajor = true;
-      chordDefIndex = getDiatonicChordType(switchIndex);
-    } else if (scaleType == 1) {
-      diatonicIsMajor = false;
-      chordDefIndex = getDiatonicChordType(switchIndex);
-    } else if (scaleType == 2) {
-      chordDefIndex = 2;  // Power 5
-    } else {
-      chordDefIndex = 3;  // Power 8
-    }
-    
-    // Gebe Akkordtyp aus
-    Serial.print("Switch ");
-    Serial.print(switchIndex);
-    Serial.print(" - Akkord: ");
-    switch(chordDefIndex) {
-      case 0: Serial.println("Major"); break;
-      case 1: Serial.println("Minor"); break;
-      case 2: Serial.println("Power 5"); break;
-      case 3: Serial.println("Power 8"); break;
-      case 4: Serial.println("Sus4"); break;
-      case 5: Serial.println("Augmented"); break;
-      case 6: Serial.println("Diminished"); break;
-      default: Serial.println("Unknown"); break;
-    }
-    
-    for (int j = 0; j < maxChordNotes; j++) {
-      int noteOffset = getChordNote(switchIndex, scaleType, j);
-      if (noteOffset >= 0) {  // Nur wenn Note definiert (>= 0)
-        int chordNote = baseNote + noteOffset;  // Addiere Semitone zur Basis-Note
-        
-        // Falte die Note in die Range: currentOctave*12 bis (currentOctave+1)*12
-        while (chordNote > (currentOctave + 1) * 12) {
-          chordNote -= 12;  // Eine Oktave nach unten
-        }
-        while (chordNote < currentOctave * 12) {
-          chordNote += 12;  // Eine Oktave nach oben
-        }
-        
-        noteOn(0x90, chordNote, 0x45);  // Note On mit velocity
-        
-        // Berechne LED-Index für die gefaltete Note
-        int displaySwitchIndex;
-        if (chordNote == (currentOctave + 1) * 12) {
-          displaySwitchIndex = 12;
+    chordDefIndex = 3;  // Power 8
+  }
+  
+  // Debug-Output
+  Serial.print("Switch ");
+  Serial.print(switchIndex);
+  Serial.print(" - Akkord: ");
+  switch(chordDefIndex) {
+    case 0: Serial.println("Major"); break;
+    case 1: Serial.println("Minor"); break;
+    case 2: Serial.println("Power 5"); break;
+    case 3: Serial.println("Power 8"); break;
+    case 4: Serial.println("Sus4"); break;
+    case 5: Serial.println("Augmented"); break;
+    case 6: Serial.println("Diminished"); break;
+    default: Serial.println("Unknown"); break;
+  }
+  
+  const uint32_t OUT_OF_RANGE_COLOR = 0x0000FF;  // Blau
+  
+  for (int j = 0; j < maxChordNotes; j++) {
+    int noteOffset = getChordNote(switchIndex, scaleType, j);
+    if (noteOffset >= 0) {
+      int chordNote = baseNote + noteOffset;
+      
+      // Falte/passe Note an je nach Modus
+      bool isOutOfRange = false;
+      if (isFolded) {
+        while (chordNote > (currentOctave + 1) * 12) chordNote -= 12;
+        while (chordNote < currentOctave * 12) chordNote += 12;
+      } else {
+        if (chordNote > (currentOctave + 1) * 12) isOutOfRange = true;
+        else if (chordNote < currentOctave * 12) isOutOfRange = true;
+      }
+      
+      noteOn(0x90, chordNote, 0x45);  // Note On mit velocity
+      
+      // Berechne Display-Index
+      int displaySwitchIndex = (chordNote == (currentOctave + 1) * 12) ? 12 : (chordNote % 12);
+      
+      if (displaySwitchIndex >= 0 && displaySwitchIndex < NUM_SWITCHES) {
+        if (!isFolded && isOutOfRange) {
+          setLEDWithColor(displaySwitchIndex, true, OUT_OF_RANGE_COLOR);
         } else {
-          displaySwitchIndex = chordNote % 12;
-        }
-        if (displaySwitchIndex >= 0 && displaySwitchIndex < NUM_SWITCHES) {
           setLED(displaySwitchIndex, true);
         }
       }
@@ -607,13 +787,12 @@ void playChordFolded(int switchIndex, bool on) {
   }
 }
 
-// Spiele Akkord für einen Switch (on=true) oder schalte ihn aus (on=false)
-void playChord(int switchIndex, bool on) {
-  // Bei diatonischen Modi (0-6): Prüfe ob Note diatonisch ist
+// Spiele Akkord mit Octave Folding (Töne werden in der Range gehalten)
+void playChordFolded(int switchIndex, bool on) {
+  // Bei diatonischen Modi (0-6): Prüfe ob Taste diatonisch ist
   if (scaleType >= 0 && scaleType <= 6 && !isDiatonicNote(switchIndex)) {
-    // Nicht-diatonische Note - ignorieren oder LED ausschalten
+    // Nicht-diatonische Taste - ignorieren
     if (on) {
-      // Visueller Hinweis: LED kurz rot blinken für deaktivierte Note
       int ledIndex = ledMapping[switchIndex];
       pixels.setPixelColor(ledIndex, pixels.Color(0, 20, 0)); // Rot
       pixels.show();
@@ -621,147 +800,36 @@ void playChord(int switchIndex, bool on) {
       pixels.setPixelColor(ledIndex, pixels.Color(0, 0, 0)); // Aus
       pixels.show();
     }
-    return; // Beende Funktion ohne Akkord zu spielen
+    return;
   }
   
-  // Berechne die Basis-MIDI-Note für diesen Switch
-  int baseNote = midiNotes[switchIndex] + (currentOctave * 12);
-  
-  // Farbe für Out-of-Range Noten (blau)
-  const uint32_t OUT_OF_RANGE_COLOR = 0x0000FF;  // Blau
+  if (!on) {
+    turnOffChordNotes(switchIndex, true);
+  } else {
+    turnOnChordNotes(switchIndex, true);
+  }
+}
+
+// Spiele Akkord für einen Switch (on=true) oder schalte ihn aus (on=false)
+void playChord(int switchIndex, bool on) {
+  // Bei diatonischen Modi (0-6): Prüfe ob Taste diatonisch ist
+  if (scaleType >= 0 && scaleType <= 6 && !isDiatonicNote(switchIndex)) {
+    // Nicht-diatonische Taste - ignorieren
+    if (on) {
+      int ledIndex = ledMapping[switchIndex];
+      pixels.setPixelColor(ledIndex, pixels.Color(0, 20, 0)); // Rot
+      pixels.show();
+      delay(100);
+      pixels.setPixelColor(ledIndex, pixels.Color(0, 0, 0)); // Aus
+      pixels.show();
+    }
+    return;
+  }
   
   if (!on) {
-    // Akkord ausschalten
-    for (int j = 0; j < maxChordNotes; j++) {
-      int noteOffset = getChordNote(switchIndex, scaleType, j);
-      if (noteOffset >= 0) {  // Nur wenn Note definiert (>= 0)
-        int chordNote = baseNote + noteOffset;  // Addiere Semitone zur Basis-Note
-        noteOn(0x90, chordNote, 0x00);  // Note Off
-        
-        // Berechne LED-Index basierend auf der Octave-Anpassung
-        int octaveAdjustedNote = chordNote;
-        bool isOutOfRange = false;
-        
-        // Wenn die Note außerhalb der aktuellen Octave liegt, passe sie an
-        // Range ist currentOctave*12 bis (currentOctave+1)*12 inklusive
-        if (chordNote > (currentOctave + 1) * 12) {
-          octaveAdjustedNote = chordNote - 12;  // Eine Oktave tiefer
-          isOutOfRange = true;
-        } else if (chordNote < currentOctave * 12) {
-          octaveAdjustedNote = chordNote + 12;  // Eine Oktave höher
-          isOutOfRange = true;
-        }
-        
-        // Berechne den Switch-Index aus der angepassten Note
-        int displaySwitchIndex;
-        if (chordNote == (currentOctave + 1) * 12) {
-          // Das ist die obere C (C1 in der Tastatur) - verwende Switch 12
-          displaySwitchIndex = 12;
-        } else {
-          displaySwitchIndex = octaveAdjustedNote % 12;
-        }
-        
-        if (displaySwitchIndex >= 0 && displaySwitchIndex < NUM_SWITCHES) {
-          // Prüfe, ob noch andere Akkorde diese LED steuern (außer diesem switchIndex)
-          bool ledStillActive = false;
-          for (int i = 0; i < NUM_SWITCHES; i++) {
-            if (i != switchIndex && chordNotesActive[i]) {
-              // Prüfe, ob dieser Akkord die gleiche LED steuert
-              for (int k = 0; k < maxChordNotes; k++) {
-                int offset = getChordNote(i, scaleType, k);
-                if (offset >= 0) {
-                  int otherNote = midiNotes[i] + (currentOctave * 12) + offset;
-                  int otherOctaveAdjustedNote = otherNote;
-                  if (otherNote >= (currentOctave + 1) * 12) {
-                    otherOctaveAdjustedNote = otherNote - 12;
-                  } else if (otherNote < currentOctave * 12) {
-                    otherOctaveAdjustedNote = otherNote + 12;
-                  }
-                  int otherDisplayIndex = (otherNote == (currentOctave + 1) * 12) ? 12 : (otherOctaveAdjustedNote % 12);
-                  if (otherDisplayIndex == displaySwitchIndex) {
-                    ledStillActive = true;
-                    break;
-                  }
-                }
-              }
-              if (ledStillActive) break;
-            }
-          }
-          
-          if (!ledStillActive) {
-            setLEDWithColor(displaySwitchIndex, false);
-          }
-        }
-      }
-    }
+    turnOffChordNotes(switchIndex, false);
   } else {
-    // Akkord anschalten
-    int chordDefIndex;
-    if (scaleType == 0) {
-      diatonicIsMajor = true;
-      chordDefIndex = getDiatonicChordType(switchIndex);
-    } else if (scaleType == 1) {
-      diatonicIsMajor = false;
-      chordDefIndex = getDiatonicChordType(switchIndex);
-    } else if (scaleType == 2) {
-      chordDefIndex = 2;  // Power 5
-    } else {
-      chordDefIndex = 3;  // Power 8
-    }
-    
-    // Gebe Akkordtyp aus
-    Serial.print("Switch ");
-    Serial.print(switchIndex);
-    Serial.print(" - Akkord: ");
-    switch(chordDefIndex) {
-      case 0: Serial.println("Major"); break;
-      case 1: Serial.println("Minor"); break;
-      case 2: Serial.println("Power 5"); break;
-      case 3: Serial.println("Power 8"); break;
-      case 4: Serial.println("Sus4"); break;
-      case 5: Serial.println("Augmented"); break;
-      case 6: Serial.println("Diminished"); break;
-      default: Serial.println("Unknown"); break;
-    }
-    
-    for (int j = 0; j < maxChordNotes; j++) {
-      int noteOffset = getChordNote(switchIndex, scaleType, j);
-      if (noteOffset >= 0) {  // Nur wenn Note definiert (>= 0)
-        int chordNote = baseNote + noteOffset;  // Addiere Semitone zur Basis-Note
-        noteOn(0x90, chordNote, 0x45);  // Note On mit velocity
-        
-        // Berechne LED-Index basierend auf der Octave-Anpassung
-        int octaveAdjustedNote = chordNote;
-        bool isOutOfRange = false;
-        
-        // Wenn die Note außerhalb der aktuellen Octave liegt, passe sie an
-        // Range ist currentOctave*12 bis (currentOctave+1)*12 inklusive
-        if (chordNote > (currentOctave + 1) * 12) {
-          octaveAdjustedNote = chordNote - 12;  // Eine Oktave tiefer
-          isOutOfRange = true;
-        } else if (chordNote < currentOctave * 12) {
-          octaveAdjustedNote = chordNote + 12;  // Eine Oktave höher
-          isOutOfRange = true;
-        }
-        
-        // Berechne den Switch-Index aus der angepassten Note
-        int displaySwitchIndex;
-        if (chordNote == (currentOctave + 1) * 12) {
-          // Das ist die obere C (C1 in der Tastatur) - verwende Switch 12
-          displaySwitchIndex = 12;
-        } else {
-          displaySwitchIndex = octaveAdjustedNote % 12;
-        }
-        
-        if (displaySwitchIndex >= 0 && displaySwitchIndex < NUM_SWITCHES) {
-          if (isOutOfRange) {
-            setLEDWithColor(displaySwitchIndex, true, OUT_OF_RANGE_COLOR);
-          } else {
-            setLED(displaySwitchIndex, true);
-          }
-        }
-      }
-    }
+    turnOnChordNotes(switchIndex, false);
   }
 }
 
@@ -773,26 +841,20 @@ void handleFunctionSwitches() {
     if (functionSwitches[i].trigger()) {
       // Schalter wurde gerade gedrückt
       functionSwitchPressTime[i] = millis();  // Drückzeit speichern
+      functionSwitchLongPressed[i] = false;   // Long-Press Flag zurücksetzen
       
       Serial.print("Function Switch ");
       Serial.print(i + 1);
       Serial.println(" PRESSED");
-      
-      // Spezielle Behandlung für FS3 Trigger: prüfe FS2+FS3 Kombination
-      if (i == 2 && functionSwitches[1].isDown()) {
-        // FS2 wird noch gehalten + FS3 gerade gedrückt = Kombination
-        // Inkrementiere Scale Type (mit Cycling)
-        scaleType = (scaleType + 1) % NUM_SCALE_TYPES;
-        
-        Serial.print(">>> Scale Type gewechselt zu: ");
-        switch(scaleType) {
-          case 0: Serial.println("Diatonic Major"); break;
-          case 1: Serial.println("Diatonic Minor"); break;
-          case 2: Serial.println("Power 5"); break;
-          case 3: Serial.println("Power 8"); break;
-        }
-        fs3CombinationHandled = true;  // Flag setzen um doppelte Verarbeitung zu verhindern
-        fs2CombinationHandled = true;  // Flag auch für FS2 setzen um toggleChordMode() zu verhindern
+    }
+    
+    // Prüfe Long-Press (1000ms) während Schalter gehalten wird
+    if (functionSwitches[i].isDown() && !inSubmenu && !functionSwitchLongPressed[i]) {
+      unsigned long currentPressTime = millis() - functionSwitchPressTime[i];
+      if (currentPressTime >= LONG_PRESS_DURATION) {
+        // Long-Press erkannt - öffne entsprechendes Submenu
+        functionSwitchLongPressed[i] = true;  // Flag setzen
+        enterSubmenu(i + 1);
       }
     }
     
@@ -806,35 +868,213 @@ void handleFunctionSwitches() {
       Serial.print(pressDuration);
       Serial.println("ms)");
       
-      // Spezielle Behandlung für FS2 (Scale Type Schalter, Index 1)
-      if (i == 1) {
-        // FS2 allein: Toggle Akkord-Modus (nur wenn keine Kombination ausgeführt wurde)
-        if (!fs2CombinationHandled) {
-          toggleChordMode();
-        } else {
-          Serial.println(">>> FS2 Kombination - toggleChordMode() übersprungen");
+      // Nur Short-Press verarbeiten wenn kein Long-Press ausgeführt wurde
+      if (!functionSwitchLongPressed[i]) {
+        handleShortPress(i + 1);
+      }
+      
+      // Flag zurücksetzen
+      functionSwitchLongPressed[i] = false;
+    }
+  }
+}
+
+// Short-Press Handler für Funktionstasten
+void handleShortPress(int fsNumber) {
+  if (inSubmenu) {
+    // Im Submenu: Navigation und Aktionen
+    switch(fsNumber) {
+      case 1: // FS1: Cancel
+        exitSubmenu(false);
+        break;
+      case 2: // FS2: Save & Apply
+        exitSubmenu(true);
+        break;
+      case 3: // FS3: Index runter
+        if (submenuIndex > 0) {
+          submenuIndex--;
+          submenuChanged = true;
+          updateControllerLEDs();
         }
-        // Flag zurücksetzen beim FS2 Release
-        fs2CombinationHandled = false;
-      } else if (i == 2) {
-        // FS3 (A3) Handler - aber nur wenn nicht mit FS2 kombiniert
-        if (!fs3CombinationHandled) {
-          // FS3 allein: Oktave runter
-          decrementOctave();
-        } else {
-          Serial.println(">>> FS3 Kombination - decrementOctave() übersprungen");
+        break;
+      case 4: // FS4: Index hoch
+        if (submenuIndex < maxSubmenuIndex - 1) {
+          submenuIndex++;
+          submenuChanged = true;
+          updateControllerLEDs();
         }
-        // Flag zurücksetzen beim FS3 Release
-        fs3CombinationHandled = false;
-      } else if (i == 3) {
-        // FS4 (A4): Oktave rauf
+        break;
+    }
+  } else {
+    // Hauptmenü: Ein/Aus-Funktionen (nicht Toggle)
+    switch(fsNumber) {
+      case 1: // FS1: Play Mode Ein/Aus
+        togglePlayModeOnOff();
+        break;
+      case 2: // FS2: Chord Mode Ein/Aus
+        toggleChordModeOnOff();
+        break;
+      case 3: // FS3: Oktave runter
+        decrementOctave();
+        break;
+      case 4: // FS4: Oktave hoch
         incrementOctave();
-      } else if (i == 0) {
-        // FS1 (A1): Toggle Hold Mode
-        toggleHoldMode();
+        break;
+    }
+  }
+}
+
+// Submenu betreten
+void enterSubmenu(int submenuNumber) {
+  inSubmenu = true;
+  currentSubmenu = submenuNumber;
+  submenuIndex = 0;
+  submenuChanged = true;
+  
+  switch(submenuNumber) {
+    case 1: // Play Mode Submenu
+      maxSubmenuIndex = 2; // Hold, Hold+Additive
+      submenuIndex = playModeType;
+      break;
+    case 2: // Chord Mode Submenu
+      maxSubmenuIndex = NUM_SCALE_TYPES;
+      submenuIndex = scaleType;
+      break;
+    case 3: // Submenu 3 (noch nicht implementiert)
+      maxSubmenuIndex = 1;
+      break;
+    case 4: // Submenu 4 (noch nicht implementiert)
+      maxSubmenuIndex = 1;
+      break;
+  }
+  
+  Serial.print("Submenu ");
+  Serial.print(submenuNumber);
+  Serial.println(" geöffnet");
+  updateControllerLEDs();
+}
+
+// Submenu verlassen
+void exitSubmenu(bool saveChanges) {
+  if (saveChanges) {
+    switch(currentSubmenu) {
+      case 1: // Play Mode Submenu
+        if (submenuIndex != playModeType) {
+          playModeType = submenuIndex;
+          // Aktualisiere entsprechende Modi (nur wenn Play Mode aktiv ist)
+          if (playModeActive) {
+            holdMode = (playModeType == PLAY_MODE_HOLD || playModeType == PLAY_MODE_ADDITIVE);
+            additiveMode = (playModeType == PLAY_MODE_ADDITIVE);
+          }
+          Serial.print("Play Mode Type gesetzt auf: ");
+          switch(playModeType) {
+            case PLAY_MODE_HOLD: Serial.println("HOLD"); break;
+            case PLAY_MODE_ADDITIVE: Serial.println("HOLD + ADDITIVE"); break;
+          }
+        }
+        break;
+      case 2: // Chord Mode Submenu
+        if (submenuIndex != scaleType) {
+          scaleType = submenuIndex;
+          Serial.print("Scale Type gesetzt auf: ");
+          Serial.println(scaleType);
+        }
+        // Chord Mode automatisch aktivieren wenn Scale Type gewählt wird
+        if (!chordModeActive && scaleType < NUM_SCALE_TYPES) {
+          chordModeActive = true;
+          chordModeType = (scaleType >= SCALE_POWER5) ? CHORD_MODE_EXTENDED : CHORD_MODE_EXTENDED;
+          Serial.println("Chord Mode automatisch aktiviert");
+        }
+        break;
+    }
+  }
+  
+  inSubmenu = false;
+  currentSubmenu = 0;
+  submenuIndex = 0;
+  submenuChanged = true;
+  Serial.println("Submenu verlassen");
+  updateControllerLEDs();
+}
+
+// Toggle Play Mode Ein/Aus (FS1 Short Press)
+void togglePlayModeOnOff() {
+  playModeActive = !playModeActive;
+  
+  // Bei Deaktivierung: Alle gehaltenen Noten ausschalten
+  if (!playModeActive) {
+    // Standard Hold Mode ausschalten
+    if (heldNote != -1) {
+      noteOn(0x90, heldNote, 0x00);
+      heldNote = -1;
+    }
+    // Additive Mode ausschalten  
+    for (int i = 0; i < NUM_SWITCHES; i++) {
+      if (heldNotes[i]) {
+        int note = midiNotes[i] + (currentOctave * 12);
+        noteOn(0x90, note, 0x00);
+        heldNotes[i] = false;
+        setLED(i, false);
+      }
+    }
+    // Entsprechende Modi zurücksetzen
+    holdMode = false;
+    additiveMode = false;
+  } else {
+    // Bei Aktivierung: Modi basierend auf playModeType setzen (Default: Hold)
+    holdMode = (playModeType == PLAY_MODE_HOLD || playModeType == PLAY_MODE_ADDITIVE);
+    additiveMode = (playModeType == PLAY_MODE_ADDITIVE);
+  }
+  
+  Serial.print("Play Mode: ");
+  Serial.println(playModeActive ? "EIN" : "AUS");
+  updateControllerLEDs();
+}
+
+// Toggle Chord Mode Ein/Aus (FS2 Short Press)
+void toggleChordModeOnOff() {
+  chordModeActive = !chordModeActive;
+  
+  // Bei Aktivierung: Setze einen gültigen Chord Mode Type wenn er noch auf OFF steht
+  if (chordModeActive && chordModeType == CHORD_MODE_OFF) {
+    chordModeType = CHORD_MODE_EXTENDED;  // Standard: Extended Mode
+  }
+  
+  // Bei Deaktivierung: Alle aktiven Akkord-Noten ausschalten
+  if (!chordModeActive) {
+    for (int i = 0; i < NUM_SWITCHES; i++) {
+      if (chordNotesActive[i]) {
+        if (chordModeType == CHORD_MODE_EXTENDED) {
+          playChord(i, false);
+        } else if (chordModeType == CHORD_MODE_FOLDED) {
+          playChordFolded(i, false);
+        }
+        chordNotesActive[i] = false;
       }
     }
   }
+  
+  Serial.print("Chord Mode: ");
+  Serial.println(chordModeActive ? "EIN" : "AUS");
+  updateControllerLEDs();
+}
+
+// Toggle Play Mode Type (für Submenu - deprecated, wird nicht mehr verwendet)
+void togglePlayMode() {
+  playModeType = (playModeType + 1) % 2;  // 0 -> 1 -> 0
+  
+  // Nur aktualisieren wenn Play Mode aktiv ist
+  if (playModeActive) {
+    holdMode = (playModeType == PLAY_MODE_HOLD || playModeType == PLAY_MODE_ADDITIVE);
+    additiveMode = (playModeType == PLAY_MODE_ADDITIVE);
+  }
+  
+  Serial.print("Play Mode Type: ");
+  switch(playModeType) {
+    case PLAY_MODE_HOLD: Serial.println("HOLD"); break;
+    case PLAY_MODE_ADDITIVE: Serial.println("HOLD + ADDITIVE"); break;
+  }
+  updateControllerLEDs();
 }
 
 // Toggle Hold Modus
@@ -1008,22 +1248,19 @@ void loop() {
       Serial.print("): PRESSED - Note ");
       Serial.println(currentNote);
       
-      // Prüfe ob Function2 (A2) gleichzeitig gedrückt ist
-      if (functionSwitches[1].isDown()) {
-        // Function2 + Taste = setze neuen diatonischen Grundton
+      // Im Submenu 2 (Chord Mode): Root Note Auswahl
+      if (inSubmenu && currentSubmenu == 2) {
         diatonicRootKey = midiNotes[i];
-        diatonicIsMajor = true;
-        
-        Serial.print(">>> Diatonischer Root gesetzt auf: ");
+        confirmLED(i); // Bestätigungs-Blinken
+        Serial.print("Root Key gesetzt auf: ");
         const char* noteNames[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
         Serial.println(noteNames[diatonicRootKey]);
-        
-        fs2CombinationHandled = true;  // Flag setzen um toggleChordMode() beim FS2 Release zu verhindern
-        return;  // Beende loop iteration, normale Note nicht spielen
+        return; // Verlasse loop iteration, normale Note nicht spielen
       }
       
       // Akkord Modus: mehrere Noten gleichzeitig
-      if (chordModeType != CHORD_MODE_OFF) {
+      if (chordModeActive && chordModeType != CHORD_MODE_OFF) {
+        disableControllerLEDsForNotes();  // Controller-LEDs ausschalten
         if (holdMode) {
           // Akkord-Hold Modus: Akkord wird geholt (alte Akkorde ausgelöst)
           setHeldChord(i);
@@ -1039,10 +1276,12 @@ void loop() {
       }
       // Hold Modus: Note halten bis zum nächsten Drücken
       else if (holdMode) {
+        disableControllerLEDsForNotes();  // Controller-LEDs ausschalten
         setLED(i, true);
         setHeldNote(currentNote, i);
       } else {
         // Normal Modus: Note solange gedrückt
+        disableControllerLEDsForNotes();  // Controller-LEDs ausschalten
         setLED(i, true);
         noteOn(0x90, currentNote, 0x45);
       }
@@ -1061,12 +1300,12 @@ void loop() {
       Serial.println(currentNote);
       
       // LED ausschalten (nur im Normal Modus und nicht im Akkord-Modus)
-      if (!holdMode && chordModeType == CHORD_MODE_OFF) {
+      if (!holdMode && (!chordModeActive || chordModeType == CHORD_MODE_OFF)) {
         setLED(i, false);
       }
       
       // Akkord Modus: Akkord ausschalten (nur wenn NOT in Hold-Modus)
-      if (chordModeType != CHORD_MODE_OFF && !holdMode) {
+      if (chordModeActive && chordModeType != CHORD_MODE_OFF && !holdMode) {
         if (chordModeType == CHORD_MODE_EXTENDED) {
           playChord(i, false);
         } else if (chordModeType == CHORD_MODE_FOLDED) {
@@ -1075,7 +1314,7 @@ void loop() {
         chordNotesActive[i] = false;
       }
       // Nur im Normal Modus die Note ausschalten
-      else if (!holdMode && chordModeType == CHORD_MODE_OFF) {
+      else if (!holdMode && (!chordModeActive || chordModeType == CHORD_MODE_OFF)) {
         noteOn(0x90, currentNote, 0x00);
       }
     }
@@ -1083,4 +1322,8 @@ void loop() {
   
   // Verarbeite Funktions-Schalter (A1-A4)
   handleFunctionSwitches();
+  
+  // Update Idle-Status
+  updateIdleStatus();
+  updateConfirmationBlink();
 }
