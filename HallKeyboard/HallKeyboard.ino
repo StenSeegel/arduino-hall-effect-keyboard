@@ -152,26 +152,28 @@ const int chordDefinitions[7][3] = {
 // und wird mit (diatonicDegree + scaleType) % 7 für jeden Modus neu indexiert
 const int diatonicChordPattern[7] = {0, 1, 1, 0, 0, 1, 6};  // Major, minor, minor, Major, Major, minor, Dim
 
-// Alle 7 Modi mit ihren genauen Semitone-Intervallen (relativ zur Root Note)
-// Index 0 = Ionian (Major/Dur-Tonleiter)
-const int modeIntervals[7][7] = {
-  {0, 2, 4, 5, 7, 9, 11},  // 0: Ionian (Major/Dur)
-  {0, 2, 3, 5, 7, 9, 10},  // 1: Dorian
-  {0, 1, 3, 5, 7, 8, 10},  // 2: Phrygian
-  {0, 2, 4, 6, 7, 9, 11},  // 3: Lydian
-  {0, 2, 4, 5, 7, 9, 10},  // 4: Mixolydian
-  {0, 2, 3, 5, 7, 8, 10},  // 5: Aeolian (Natural Minor)
-  {0, 1, 3, 5, 6, 8, 10}   // 6: Locrian
-};
+// Intervall-Pattern für alle diatonischen Modi
+// {2, 2, 1, 2, 2, 2, 1} = Ganz, Ganztöne, Halbtöne (in Semitonen)
+// Das Pattern wird mit (stepIndex + scaleType) % 7 rotiert für jeden Modus
+const int modeStepIntervals[7] = {2, 2, 1, 2, 2, 2, 1};  // Intervalle für Ionian
 
-// Hilfsfunktion um zu prüfen ob eine Note in der diatonischen Tonleiter ist (mit Index-Verschiebung für Modi)
+// Helper-Funktion um die Semitone für einen Modus zu berechnen
+int getModeNote(int degree, int mode) {
+  int semitones = 0;
+  for (int i = 0; i < degree; i++) {
+    semitones += modeStepIntervals[(i + mode) % 7];
+  }
+  return semitones;
+}
+
+// Hilfsfunktion um zu prüfen ob eine Note in der diatonischen Tonleiter ist
 bool isDiatonicNote(int switchIndex) {
   int noteOffset = (midiNotes[switchIndex] - diatonicRootKey + 12) % 12;
   
   if (scaleType >= 0 && scaleType <= 6) {
-    // Verwende das exakte Modus-Intervall Array für den aktuellen Modus
+    // Prüfe gegen alle 7 Töne des Modus
     for (int i = 0; i < 7; i++) {
-      if (noteOffset == modeIntervals[scaleType][i]) {
+      if (noteOffset == getModeNote(i, scaleType)) {
         return true;
       }
     }
@@ -186,14 +188,12 @@ bool isDiatonicNote(int switchIndex) {
 // switchIndex: 0-12 (C bis C)
 // Gibt zurück welcher Akkordtyp (0-6) für diese Taste verwendet werden sollte
 int getDiatonicChordType(int switchIndex) {
-  // Berechne den Abstand vom Root Key
   int noteOffset = (midiNotes[switchIndex] - diatonicRootKey + 12) % 12;
   
-  // Bestimme die diatonische Stufe (0-6) durch Suche im exakten Modus-Intervall Array
+  // Bestimme die diatonische Stufe (0-6)
   int diatonicDegree = -1;
   for (int i = 0; i < 7; i++) {
-    // Verwende das exakte Modus-Intervall Array für den aktuellen Modus
-    if (noteOffset == modeIntervals[scaleType][i]) {
+    if (noteOffset == getModeNote(i, scaleType)) {
       diatonicDegree = i;
       break;
     }
@@ -205,8 +205,6 @@ int getDiatonicChordType(int switchIndex) {
   }
   
   // Gebe den Akkordtyp basierend auf dem Muster zurück
-  // Der Akkordtyp wird durch (diatonicDegree + scaleType) % 7 bestimmt
-  // Das ergibt automatisch den richtigen Akkordtyp für den Modus
   if (scaleType >= 0 && scaleType <= 6) {
     int modalIndex = (diatonicDegree + scaleType) % 7;
     return diatonicChordPattern[modalIndex];
