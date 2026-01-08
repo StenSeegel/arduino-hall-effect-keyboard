@@ -1,252 +1,424 @@
+/*!
+ * @file button.h
+ * @brief Enhanced Button Library with Advanced Debouncing and State Management
+ * @author Hall-Effect Keyboard Project
+ * @version 2.0
+ * @date Januar 2026
+ * 
+ * This library provides comprehensive button handling functionality including:
+ * - Advanced bit-shift debouncing for reliable input detection
+ * - State management (pressed, released, held)
+ * - Toggle and hold functionality 
+ * - Analog input support for rotary switches and potentiometers
+ * - Resistor ladder switch support
+ */
+
 #ifndef button_h
 #define button_h
 #include "Arduino.h"
+
 /*!
-    @brief  Class for debouncing diffeent objects.
-    @details This class provides methods for debouncing a button, toggling a button and holding a button.
-*/
+ * @brief Advanced Button Class with Debouncing and State Management
+ * @details Provides methods for debouncing buttons, detecting press/release events,
+ *          toggle functionality, hold detection, and analog input processing.
+ *          Uses bit-shift debouncing for reliable and fast input detection.
+ */
 class Button {
   private:
-    uint8_t _pin;
-    uint32_t state;
-    uint32_t triggerState;
-
-    int rotaryPosition;
-    int oldPot;
-    bool previousState;
-    unsigned long pressTime = 0; // Zeitpunkt, zu dem der Button zuletzt gedrückt wurde
-    const unsigned long holdDuration = 1000; // Mindestdauer in Millisekunden, die der Button gedrückt sein muss
+    // === Pin Configuration ===
+    uint8_t _pin;                           ///< Arduino pin number for this button
     
-    // Debounce-Zustand: trackiert den stabilen Zustand des Buttons
-    bool stableState = HIGH; // Der zuletzt stabile Zustand (HIGH = nicht gedrückt)
-    uint8_t debounceCounter = 0; // Zählt stabile Samples
+    // === Bit-Shift Debouncing Registers ===
+    uint32_t state;                         ///< General state register for various operations
+    uint32_t triggerState;                  ///< Bit-shift register for press detection (HIGH->LOW)
+    uint32_t releaseState;                  ///< Bit-shift register for release detection (LOW->HIGH)
+    
+    // === Debounce State Management ===
+    bool stableState;                       ///< Current stable debounced state (HIGH=not pressed, LOW=pressed)
+    bool lastStableState;                   ///< Previous stable state for change detection
+    uint8_t debounceCounter;                ///< Counter for stable samples during debouncing
+    
+    // === Hold Detection ===
+    unsigned long pressTime;                ///< Timestamp when button was last pressed
+    static const unsigned long holdDuration = 1000; ///< Minimum hold duration in milliseconds
+    
+    // === Analog Input Support ===
+    int rotaryPosition;                     ///< Current position for rotary switches (0-5)
+    int oldPot;                            ///< Previous potentiometer value for change detection
+    bool previousState;                     ///< Previous state for legacy operations
 
 
   public:
-    bool toggled; // Zustandsvariable für den Toggle-Switch
-    bool isPressed; // Zustandsvariable, um zu prüfen, ob der Button aktuell gedrückt wird
-    bool isHold;
-    bool holdToggle;
+    // === Public State Variables ===
+    bool toggled;                           ///< Toggle state (true/false) for toggle switch functionality
+    bool isPressed;                         ///< Current pressed state (updated during debouncing)
+    bool isHold;                           ///< True when button is being held for minimum duration
+    bool holdToggle;                       ///< Toggle state specifically for hold operations
 
 
-    // Initialisierungsmethode
+    /*!
+     * @brief Initialize button with specified pin
+     * @param button Arduino pin number to use for this button
+     * @details Sets up pin as INPUT_PULLUP and initializes all state variables.
+     *          Must be called in setup() before using any other button functions.
+     */
     void begin(uint8_t button) {
       _pin = button;
+      
+      // Initialize bit-shift registers
       state = 0;
       triggerState = 0;
-      toggled = false; // Initialer Zustand des Toggle-Switches
+      releaseState = 0;
+      
+      // Initialize state variables
+      toggled = false;
       isPressed = false;
-      int rotaryPosition = 0;
-      int oldPot = 0;
+      isHold = false;
+      holdToggle = false;
+      
+      // Initialize debounce state
+      stableState = HIGH;
+      lastStableState = HIGH;
+      debounceCounter = 0;
+      
+      // Initialize timing and analog variables
+      pressTime = 0;
+      rotaryPosition = 0;
+      oldPot = 0;
+      previousState = false;
+      
+      // Configure pin with internal pull-up resistor
       pinMode(_pin, INPUT_PULLUP);
     }
 
-/*!
-    @brief   Simply debounce a button.
-    @details Erkennt einen Button-Druck sofort (wenn erstes Byte high ist) und verhindert
-             falsche Zustandsänderungen während des Einschwungs durch n konsistente Samples.
-    @return  True für kurzen Impuls wenn der Button gedrückt wird.
-*/
+    /*!
+     * @brief Advanced debounce with stable state tracking
+     * @return True when button is pressed (HIGH->LOW transition detected)
+     * @details Uses sample counting to ensure stable state before registering change.
+     *          Requires 16 consistent samples to confirm state change, preventing
+     *          false triggers from electrical noise or mechanical bounce.
+     *          Updates internal state variables (stableState, isPressed) automatically.
+     */
     bool debounce() {
       bool currentInput = digitalRead(_pin);
       
-      // Wenn sich der Input vom stabilen Zustand unterscheidet
+      // Check if input differs from current stable state
       if (currentInput != stableState) {
         debounceCounter++;
-        // Wenn wir 16 konsistente Samples haben, stabilisiert sich der Zustand
+        
+        // Require 16 consistent samples before accepting state change
         if (debounceCounter >= 16) {
-          stableState = currentInput;
-          debounceCounter = 0;
-          // Gebe true zurück wenn der Button gerade gedrückt wurde (HIGH zu LOW)
-          return (currentInput == LOW);
+          lastStableState = stableState;     // Store previous state for change detection
+          stableState = currentInput;        // Update to new stable state
+          debounceCounter = 0;               // Reset counter
+          
+          // Update public state variable
+          isPressed = (stableState == LOW);
+          
+          // Return true only on press event (HIGH->LOW)
+          return (stableState == LOW && lastStableState == HIGH);
         }
       } else {
-        // Input ist wieder stabil, Reset
+        // Input matches stable state - reset counter
         debounceCounter = 0;
       }
       
       return false;
     }
-     bool trigger() {
-      triggerState = (triggerState<<1) | digitalRead(_pin) | 0xfe000000;
+
+    /*!
+     * @brief Fast bit-shift debounced trigger detection
+     * @return True for single pulse when button is pressed (HIGH->LOW)
+     * @details Uses bit-shift register for extremely fast debouncing.
+     *          Pattern 0xffff0000 indicates: 16 HIGH samples followed by 16 LOW samples.
+     *          Ideal for immediate response to button presses in main loop.
+     */
+    bool trigger() {
+      triggerState = (triggerState << 1) | digitalRead(_pin) | 0xfe000000;
       return (triggerState == 0xffff0000);
     }
 
-/*!
-    @brief   Simply debounce a button and toggle it.
-    @return  True after the button is pressed once. False after pressing it again.
-*/
+    /*!
+     * @brief Detect button release events
+     * @return True for single pulse when button is released (LOW->HIGH)
+     * @details Uses inverted bit-shift register to detect release transitions.
+     *          Inverts the input so LOW becomes HIGH for pattern detection.
+     *          Perfect for detecting when user stops pressing button.
+     */
+    bool released() {
+      // Invert the input: LOW (pressed) becomes HIGH, HIGH (released) becomes LOW
+      bool invertedInput = !digitalRead(_pin);
+      releaseState = (releaseState << 1) | invertedInput | 0xfe000000;
+      return (releaseState == 0xffff0000);
+    }
+
+    /*!
+     * @brief Get current stable button state
+     * @return True if button is currently pressed (LOW), False if released (HIGH)
+     * @details Returns the current debounced state without triggering events.
+     *          Updates internal state through debounce() call.
+     *          Use for state queries and button combinations.
+     */
+    bool isDown() {
+      debounce();  // Ensure state is current
+      return (stableState == LOW);
+    }
+
+    /*!
+     * @brief Check if button state has changed
+     * @return True if state changed since last stable state
+     * @details Compares current stable state with previous stable state.
+     *          Useful for detecting any state transitions (press OR release).
+     */
+    bool stateChanged() {
+      debounce();  // Update current state
+      return (stableState != lastStableState);
+    }
+
+    /*!
+     * @brief Toggle switch functionality
+     * @return Current toggle state (true/false)
+     * @details Toggles internal state each time button is pressed.
+     *          Ignores presses when button is in hold mode.
+     *          Perfect for on/off switches and mode toggles.
+     */
     bool toggle() {
-        if (trigger() && !isHold && !isPressed) { // Wenn der Button gedrückt wurde und der Zustand 0 ist
-          toggled = !toggled; // Zustand umschalten
-          return toggled; // Aktuellen Zustand zurückgeben
-        }
-     }
+      if (trigger() && !isHold && !isPressed) {
+        toggled = !toggled;
+        return toggled;
+      }
+      return toggled;
+    }
 
+    /*!
+     * @brief Advanced hold detection with timing
+     * @return True while button is held beyond minimum duration
+     * @details Detects when button is pressed and held for longer than holdDuration.
+     *          Manages state transitions: press -> hold -> release.
+     *          Updates holdToggle state and manages timing automatically.
+     */
+    bool hold() {
+      unsigned long currentTime = millis();
+      bool currentState = (digitalRead(_pin) == LOW);
 
-/*!
-    @brief   Simply debounce a button and toggle it.
-    @return  True while the button is actively pressed and hold for a anount of time.
-*/
- bool hold() {
-      unsigned long currentTime = millis(); // Aktuelle Zeit in Millisekunden seit dem Programmstart
-      bool currentState = digitalRead(_pin) == LOW; // Aktuellen Zustand des Buttons lesen
-
-      if (trigger()) { // Wenn der Button gedrückt wurde und der Zustand 0 ist
-        pressTime = currentTime; // Zeitpunkt speichern, zu dem der Button gedrückt wurde
-      //Serial.println("Button pressed");
+      // Button just pressed
+      if (trigger()) {
+        pressTime = currentTime;
         holdToggle = false;
-        isPressed = true; // Vorherigen Zustand aktualisieren
-        isHold = false; // is pressed
-        toggled = !toggled; // Zustand umschalten
-      } 
-      if (currentState && pressTime > 0 && currentTime - pressTime > holdDuration && !isHold) { // Wenn die Mindestdauer erreicht wurde
-    //Serial.println("Button hold");  
-      isHold = true; // is hold
-      holdToggle = !holdToggle;
-        return true; // true zurückgeben
-      } else if (!currentState && isPressed) { // Wenn der Button losgelassen wurde
-        if (isPressed && isHold) {
-          toggled = false; // Zustand umschalten
+        isPressed = true;
+        isHold = false;
+        toggled = !toggled;
+      }
 
+      // Check for hold condition
+      if (currentState && pressTime > 0 && 
+          (currentTime - pressTime > holdDuration) && !isHold) {
+        isHold = true;
+        holdToggle = !holdToggle;
+        return true;
+      }
+
+      // Button released
+      if (!currentState && isPressed) {
+        if (isHold) {
+          toggled = false;
         }
-        
-        pressTime = 0; // Zeitpunkt zurücksetzen
-      //Serial.println("Button released");  
-        isPressed = false; // Vorherigen Zustand aktualisieren
-        isHold = false; // is released
-
-        return false; // false zurückgeben
+        pressTime = 0;
+        isPressed = false;
+        isHold = false;
+        return false;
       }
- }
 
+      return false;
+    }
 
-
-/*!
-    @brief   Get the position of the alpha 6-step switch.
-    @details This method reads the analog value of the alpha 6-step switch and returns the corresponding position. 
-             There need to be 1k resistors between the pins of the switch and the analog input.
-    @return  Returns 0-5 for the 6 different positions of the switch.
-*/
+    /*!
+     * @brief Read 6-position rotary switch
+     * @return Position value (0-5) based on analog voltage divider
+     * @details Designed for Alpha 6-step rotary switches with voltage divider.
+     *          Requires 1kΩ resistors between switch positions and analog input.
+     *          Voltage thresholds are optimized for 5V operation.
+     * 
+     * Typical ADC values:
+     * - Position 0: <500   (GND)
+     * - Position 1: 501-600 (≈550)
+     * - Position 2: 601-750 (≈712) 
+     * - Position 3: 751-809 (≈793)
+     * - Position 4: 810-859 (≈840)
+     * - Position 5: >860    (≈870)
+     */
     int getPosition() {
-      int pot = analogRead(_pin); //952-761-570-380-192-0
-// Serial.println(pot);
-      if (pot < 500) {  //12
-        rotaryPosition = 0; 
-      } else if (pot > 501 && pot < 600) { // 550
+      int adcValue = analogRead(_pin);
+      
+      if (adcValue < 500) {
+        rotaryPosition = 0;
+      } else if (adcValue >= 501 && adcValue < 600) {
         rotaryPosition = 1;
-      } else if (pot > 601 && pot < 750) { // 712
+      } else if (adcValue >= 601 && adcValue < 750) {
         rotaryPosition = 2;
-      } else if (pot > 751 && pot < 809) { // 793
-        rotaryPosition = 3;    
-      } else if (pot > 810 && pot < 859) { // 840
-        rotaryPosition = 4;    
-      } else if (pot > 860) { // 870
-        rotaryPosition = 5;    
+      } else if (adcValue >= 751 && adcValue < 809) {
+        rotaryPosition = 3;
+      } else if (adcValue >= 810 && adcValue < 859) {
+        rotaryPosition = 4;
+      } else if (adcValue >= 860) {
+        rotaryPosition = 5;
       }
+      
       return rotaryPosition;
     }
 
-/*!
-    @brief   Check if the position of an potentiometer has changed between calls.
-    @details This method reads the analog value of a potentiometer and checks if the value has changed.
-             It provides a small dead zone to prevent jittering.
-    @return  Returns true if the value has changed between calls of the method.
-*/
+    /*!
+     * @brief Detect potentiometer value changes
+     * @return True if potentiometer value changed significantly since last call
+     * @details Implements dead zone of ±10 ADC units to prevent noise-induced
+     *          false triggers. Ideal for volume controls, parameter adjustment.
+     *          Automatically updates internal reference value.
+     */
     bool hasChanged() {
-
-      int rawPot = analogRead(_pin);
-
-     if (abs(oldPot - rawPot) > 10) {
-      state = true;
-      oldPot = rawPot;
+      int currentValue = analogRead(_pin);
+      
+      // Check if change exceeds dead zone threshold
+      if (abs(oldPot - currentValue) > 10) {
+        oldPot = currentValue;  // Update reference
+        state = true;
       } else {
         state = false;
       }
+      
       return state;
     }
 };
 
 /*!
-    @brief  Class for reading a resistor ladder with 4 switches.
-    @details This class provides methods for reading 4 switches connected via a resistor ladder to an analog pin.
-*/
+ * @brief Resistor Ladder Switch Reader Class
+ * @details Handles 4 switches connected through a resistor ladder network to a single analog pin.
+ *          Provides debounced switch detection with configurable thresholds.
+ *          Ideal for reducing pin usage when multiple switches are needed.
+ * 
+ * Typical resistor ladder configuration:
+ * - Switch 1: Direct to GND        (ADC ≈ 0)
+ * - Switch 2: Through R1 to GND    (ADC ≈ 128)
+ * - Switch 3: Through R1+R2 to GND (ADC ≈ 384)
+ * - Switch 4: Through R1+R2+R3     (ADC ≈ 640)
+ * - No switch: Pull-up resistor    (ADC ≈ 1023)
+ */
 class LadderSwitch {
   private:
-    uint8_t _pin;
-    int currentSwitch;
-    int lastSwitch;
-    unsigned long lastReadTime;
-    unsigned long debounceDelay;
+    // === Pin Configuration ===
+    uint8_t _pin;                    ///< Analog pin for reading ladder voltage
     
-    // ADC thresholds for 4 switches
-    int threshold1;
-    int threshold2;
-    int threshold3;
-    int threshold4;
+    // === State Management ===
+    int currentSwitch;               ///< Currently detected switch (0-3, -1=none)
+    int lastSwitch;                  ///< Previously detected switch for change detection
+    
+    // === Timing and Debouncing ===
+    unsigned long lastReadTime;      ///< Timestamp of last reading for debounce timing
+    unsigned long debounceDelay;     ///< Debounce delay in milliseconds
+    
+    // === ADC Thresholds ===
+    int threshold1;                  ///< ADC threshold for switch 1 (lowest voltage)
+    int threshold2;                  ///< ADC threshold for switch 2
+    int threshold3;                  ///< ADC threshold for switch 3
+    int threshold4;                  ///< ADC threshold for switch 4 (highest voltage)
 
   public:
-    // Initialisierungsmethode
+    /*!
+     * @brief Initialize ladder switch with pin and thresholds
+     * @param pin Analog pin connected to resistor ladder
+     * @param t1 Threshold for switch 1 (default: 128)
+     * @param t2 Threshold for switch 2 (default: 384) 
+     * @param t3 Threshold for switch 3 (default: 640)
+     * @param t4 Threshold for switch 4 (default: 896)
+     * @details Default thresholds work with equal-value resistor ladder.
+     *          Adjust thresholds based on actual resistor values used.
+     */
     void begin(uint8_t pin, int t1 = 128, int t2 = 384, int t3 = 640, int t4 = 896) {
       _pin = pin;
       pinMode(_pin, INPUT);
+      
+      // Initialize state
       currentSwitch = -1;
       lastSwitch = -1;
       lastReadTime = 0;
-      debounceDelay = 50;  // 50ms debounce
+      debounceDelay = 50;  // 50ms default debounce
       
-      // Setze ADC Schwellwerte
+      // Set ADC thresholds
       threshold1 = t1;
       threshold2 = t2;
       threshold3 = t3;
       threshold4 = t4;
     }
 
-    // Lese ADC-Wert und bestimme welcher Schalter gedrückt ist
+    /*!
+     * @brief Read raw switch position from ADC value
+     * @return Switch number (0-3) or -1 if no switch pressed
+     * @details Compares ADC reading against configured thresholds.
+     *          Lower ADC values indicate switches closer to ground.
+     *          No debouncing - use getSwitch() for debounced reading.
+     */
     int readSwitch() {
       int adcValue = analogRead(_pin);
       
       if (adcValue < threshold1) {
-        return 0;  // Switch 1
+        return 0;  // Switch 1 (closest to GND)
       } else if (adcValue < threshold2) {
         return 1;  // Switch 2
       } else if (adcValue < threshold3) {
         return 2;  // Switch 3
       } else if (adcValue < threshold4) {
-        return 3;  // Switch 4
+        return 3;  // Switch 4 (furthest from GND)
       } else {
-        return -1; // Kein Schalter gedrückt
+        return -1; // No switch pressed (pull-up active)
       }
     }
 
-    // Gebe den aktuellen Schalter zurück mit Debouncing
+    /*!
+     * @brief Get debounced switch reading
+     * @return Switch number (0-3) when switch changes, -1 if no change
+     * @details Implements time-based debouncing to prevent noise.
+     *          Only returns switch number when state actually changes.
+     *          Use in main loop for reliable switch detection.
+     */
     int getSwitch() {
       unsigned long now = millis();
       
-      // Debounce: Nur alle 50ms auslesen
+      // Debounce timing check
       if (now - lastReadTime < debounceDelay) {
-        return lastSwitch;
+        return -1;  // Still in debounce period
       }
       lastReadTime = now;
       
       int switchIndex = readSwitch();
       
-      // Nur ändern wenn sich der Schalter wirklich geändert hat
+      // Only report changes
       if (switchIndex != lastSwitch) {
         lastSwitch = switchIndex;
         currentSwitch = switchIndex;
         return switchIndex;
       }
       
-      return -1;  // Keine Änderung
+      return -1;  // No change detected
     }
 
-    // Setze Debounce Verzögerung
+    /*!
+     * @brief Set debounce delay
+     * @param delay Debounce delay in milliseconds
+     * @details Adjust based on switch characteristics and noise environment.
+     *          Shorter delays = more responsive, longer delays = more stable.
+     */
     void setDebounceDelay(unsigned long delay) {
       debounceDelay = delay;
     }
 
-    // Setze ADC Schwellwerte neu
+    /*!
+     * @brief Update ADC threshold values
+     * @param t1 Threshold for switch 1 (lowest voltage)
+     * @param t2 Threshold for switch 2
+     * @param t3 Threshold for switch 3  
+     * @param t4 Threshold for switch 4 (highest voltage)
+     * @details Calibrate thresholds based on actual measured ADC values.
+     *          Set thresholds at midpoint between adjacent switch readings.
+     */
     void setThresholds(int t1, int t2, int t3, int t4) {
       threshold1 = t1;
       threshold2 = t2;
@@ -254,4 +426,40 @@ class LadderSwitch {
       threshold4 = t4;
     }
 };
-#endif
+
+#endif // button_h
+
+/*
+ * === Usage Examples ===
+ * 
+ * // Basic button usage:
+ * Button myButton;
+ * myButton.begin(2);               // Initialize on pin 2
+ * if (myButton.trigger()) {        // Detect press
+ *   // Button was just pressed
+ * }
+ * if (myButton.isDown()) {         // Check current state
+ *   // Button is currently held down
+ * }
+ * if (myButton.released()) {       // Detect release
+ *   // Button was just released
+ * }
+ * 
+ * // Rotary switch usage:
+ * Button rotary;
+ * rotary.begin(A0);                // Analog input
+ * int pos = rotary.getPosition();  // Get position 0-5
+ * 
+ * // Ladder switch usage:
+ * LadderSwitch ladder;
+ * ladder.begin(A1);                // Initialize
+ * int sw = ladder.getSwitch();     // Get switch 0-3 or -1
+ * 
+ * === Hardware Notes ===
+ * 
+ * - All digital pins automatically configured with INPUT_PULLUP
+ * - Analog pins should use external pull-up for ladder switches
+ * - Debounce timing can be adjusted per application needs
+ * - Bit-shift debouncing provides fastest response for gaming/music applications
+ * - Sample-counting debouncing provides most reliable operation for noisy environments
+ */

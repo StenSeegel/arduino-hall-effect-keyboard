@@ -5,7 +5,7 @@
 // Modi:
 // - Normal: Eine Note pro Taste, solange die Taste gedrückt ist
 // - Hold (A1): Taste gedrückt -> Note hält an, erneut gedrückt -> Note aus
-// - Additive (A2): Mehrere Noten gleichzeitig halten
+// - Additive (A2): Mehrere Noten gleichzeitig halten // Deaktiviert
 // - Akkord (Kombiniert mit A1): Taste triggert vordefinierten Akkord
 // - Oktave (A3/A4): Oktave rauf/runter
 //
@@ -21,7 +21,7 @@ const int NUM_LEDS = 8;              // 8 WS2812 LEDs
 const int LED_PIN = A5;              // Pin A5 als Digital
 const int LED_BRIGHTNESS = 50;       // LED Helligkeit (0-255)
 const int WHITE_KEY_COLOR = 0xFFFFFF;   // Farbe für weiße Tasten
-const int BLACK_KEY_COLOR = 0x8B8B8B;   // Farbe für schwarze Tasten
+const int BLACK_KEY_COLOR = 0x8B8BFF;   // Farbe für schwarze Tasten
 Adafruit_NeoPixel pixels(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
 // Pin-Belegung für alle 13 Switches
@@ -76,9 +76,6 @@ int currentOctave = 3;
 
 // Button Objekte für jeden Switch
 Button switches[NUM_SWITCHES];
-
-// Speichert ob der Switch gerade gedrückt ist
-bool switchPressed[NUM_SWITCHES];
 
 // Flag um FS2+FS3 Kombination zu handhaben
 bool fs3CombinationHandled = false;
@@ -196,7 +193,6 @@ const int functionSwitchPins[NUM_FUNCTION_SWITCHES] = {
   A1, A2, A3, A4
 };
 Button functionSwitches[NUM_FUNCTION_SWITCHES];
-bool functionSwitchPressed[NUM_FUNCTION_SWITCHES];
 unsigned long functionSwitchPressTime[NUM_FUNCTION_SWITCHES];  // Zeit beim Drücken speichern
 const unsigned long LONG_PRESS_DURATION = 1000;  // 1 Sekunde für Long-Press
 
@@ -204,7 +200,6 @@ void setup() {
   // Alle Switch-Pins initialisieren
   for (int i = 0; i < NUM_SWITCHES; i++) {
     switches[i].begin(switchPins[i]);
-    switchPressed[i] = false;
     heldNotes[i] = false;
   }
   
@@ -217,7 +212,6 @@ void setup() {
   // Funktions-Schalter initialisieren (A1-A4 als Digitalpins mit Pullup)
   for (int i = 0; i < NUM_FUNCTION_SWITCHES; i++) {
     functionSwitches[i].begin(functionSwitchPins[i]);
-    functionSwitchPressed[i] = false;
   }
   
   // Akkord-Mode Array initialisieren
@@ -244,7 +238,7 @@ void setup() {
   Serial.println("Hall-Effect Keyboard - 13 Switches");
   Serial.println("===================================");
   Serial.println("Pins: D2-D12, D17(A3), D18(A4)");
-  Serial.println("Using Button library with bit-shift debouncing");
+  Serial.println("Using Button library with bit-shift debouncing and state management");
   Serial.println("Zeigt nur State Changes an");
   Serial.println("4 Funktions-Schalter an A1-A4");
   Serial.println("8 WS2812 LEDs an A5");
@@ -264,7 +258,7 @@ void setup() {
   Serial.println("-----------------------------------\n");
   
   
-  Serial.println("Funktions-Schalter initialisiert");
+  Serial.println("Funktions-Schalter mit Button Library initialisiert");
 }
 
 // MIDI Note On/Off Funktion
@@ -290,7 +284,7 @@ void setLEDWithColor(int switchIndex, bool on, uint32_t customColor = 0xFFFFFF) 
       
       // Prüfe normale Switches
       for (int i = 0; i < NUM_SWITCHES; i++) {
-        if (i != switchIndex && switchPressed[i] && ledMapping[i] == ledIndex) {
+        if (i != switchIndex && switches[i].isDown() && ledMapping[i] == ledIndex) {
           ledStillActive = true;
           otherSwitchIndex = i;
           break;
@@ -348,7 +342,7 @@ void setLED(int switchIndex, bool on) {
       // Vor dem Ausschalten prüfen, ob noch andere Switches diese LED steuern
       int otherActiveSwitch = -1;
       for (int i = 0; i < NUM_SWITCHES; i++) {
-        if (i != switchIndex && switchPressed[i] && ledMapping[i] == ledIndex) {
+        if (i != switchIndex && switches[i].isDown() && ledMapping[i] == ledIndex) {
           otherActiveSwitch = i;
           break;
         }
@@ -694,7 +688,6 @@ void handleFunctionSwitches() {
     // Trigger gibt nur einmal true beim Drücken zurück (wenn Pin LOW wird)
     if (functionSwitches[i].trigger()) {
       // Schalter wurde gerade gedrückt
-      functionSwitchPressed[i] = true;
       functionSwitchPressTime[i] = millis();  // Drückzeit speichern
       
       Serial.print("Function Switch ");
@@ -702,7 +695,7 @@ void handleFunctionSwitches() {
       Serial.println(" PRESSED");
       
       // Spezielle Behandlung für FS3 Trigger: prüfe FS2+FS3 Kombination
-      if (i == 2 && digitalRead(functionSwitchPins[1]) == LOW) {
+      if (i == 2 && functionSwitches[1].isDown()) {
         // FS2 wird noch gehalten + FS3 gerade gedrückt = Kombination
         // Inkrementiere Scale Type (mit Cycling)
         scaleType = (scaleType + 1) % NUM_SCALE_TYPES;
@@ -719,10 +712,9 @@ void handleFunctionSwitches() {
       }
     }
     
-    // Prüfe ob Schalter losgelassen wurde (Pin ist wieder HIGH und war vorher gedrückt)
-    if (functionSwitchPressed[i] && digitalRead(functionSwitchPins[i]) == HIGH) {
+    // Prüfe ob Schalter losgelassen wurde mit Button Library Release-Erkennung
+    if (functionSwitches[i].released()) {
       unsigned long pressDuration = millis() - functionSwitchPressTime[i];
-      functionSwitchPressed[i] = false;
       
       Serial.print("Function Switch ");
       Serial.print(i + 1);
@@ -767,7 +759,7 @@ void toggleHoldMode() {
     Serial.println(heldNote);
     // LEDs für alle derzeit gedrückten Switches ausschalten
     for (int i = 0; i < NUM_SWITCHES; i++) {
-      if (switchPressed[i]) {
+      if (switches[i].isDown()) {
         setLED(i, false);
       }
     }
@@ -798,7 +790,7 @@ void toggleAdditiveMode() {
     noteOn(0x90, heldNote, 0x00);
     // LEDs ausschalten
     for (int i = 0; i < NUM_SWITCHES; i++) {
-      if (switchPressed[i]) {
+      if (switches[i].isDown()) {
         setLED(i, false);
       }
     }
@@ -920,7 +912,6 @@ void loop() {
     // Trigger gibt nur einmal true beim Drücken zurück (wenn Pin LOW wird)
     if (switches[i].trigger()) {
       // Switch wurde gerade gedrückt
-      switchPressed[i] = true;
       int currentNote = midiNotes[i] + (currentOctave * 12);
       
       Serial.print("Switch ");
@@ -931,7 +922,7 @@ void loop() {
       Serial.println(currentNote);
       
       // Prüfe ob Function2 (A2) gleichzeitig gedrückt ist
-      if (digitalRead(functionSwitchPins[1]) == LOW) {
+      if (functionSwitches[1].isDown()) {
         // Function2 + Taste = setze neuen diatonischen Grundton
         diatonicRootKey = midiNotes[i];
         diatonicIsMajor = true;
@@ -970,11 +961,9 @@ void loop() {
       }
     }
     
-    // Prüfe ob Switch losgelassen wurde
-    // Pin ist wieder HIGH und war vorher gedrückt
-    if (switchPressed[i] && digitalRead(switchPins[i]) == HIGH) {
+    // Prüfe ob Switch losgelassen wurde mit Button Library Release-Erkennung
+    if (switches[i].released()) {
       // Switch wurde gerade losgelassen
-      switchPressed[i] = false;
       int currentNote = midiNotes[i] + (currentOctave * 12);
       
       Serial.print("Switch ");
