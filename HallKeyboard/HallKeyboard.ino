@@ -19,9 +19,22 @@ const int NUM_SWITCHES = 13;
 // WS2812 LED Konfiguration
 const int NUM_LEDS = 8;              // 8 WS2812 LEDs
 const int LED_PIN = A5;              // Pin A5 als Digital
-const int LED_BRIGHTNESS = 50;       // LED Helligkeit (0-255)
+const int LED_BRIGHTNESS = 255;       // LED Helligkeit (0-255)
 const int WHITE_KEY_COLOR = 0xFFFFFF;   // Farbe für weiße Tasten
 const int BLACK_KEY_COLOR = 0x8B8BFF;   // Farbe für schwarze Tasten
+
+// Index-Palette Farben für Controller-Modus und Submenu-System (GRB Format für WS2812)
+const uint32_t INDEX_PALETTE[8] = {
+  0x69FF61,  // Index 1 - Rot/Rosa (#ff6961 RGB -> GRB)
+  0xB4FF80,  // Index 2 - Orange (#ffb480 RGB -> GRB)
+  0xF3F88D,  // Index 3 - Gelb (#f8f38d RGB -> GRB)
+  0xD642A4,  // Index 4 - Türkis/Grün (#42d6a4 RGB -> GRB)
+  0xCA08D1,  // Index 5 - Cyan/Blau (#08cad1 RGB -> GRB)
+  0xAD59F6,  // Index 6 - Himmelblau (#59adf6 RGB -> GRB)
+  0x949DFF,  // Index 7 - Violett (#9d94ff RGB -> GRB)
+  0x80C7E8   // Index 8 - Magenta/Pink (#c780e8 RGB -> GRB)
+};
+
 Adafruit_NeoPixel pixels(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
 // Pin-Belegung für alle 13 Switches
@@ -92,9 +105,18 @@ int chordModeType = 0;              // 0=off, 1=extended, 2=folded
 #define CHORD_MODE_OFF 0
 #define CHORD_MODE_EXTENDED 1
 #define CHORD_MODE_FOLDED 2
-int scaleType = 0;                  // 0=Diatonic Major, 1=Diatonic Minor, 2=Power 5, 3=Power 8
-#define NUM_SCALE_TYPES 4
-bool diatonicIsMajor = true;        // true = Dur, false = Moll
+int scaleType = 0;                  // 0-8: Alle diatonischen Modi + Power Chords
+#define NUM_SCALE_TYPES 9
+#define SCALE_IONIAN 0      // Major
+#define SCALE_DORIAN 1      // Dorian
+#define SCALE_PHRYGIAN 2    // Phrygian
+#define SCALE_LYDIAN 3      // Lydian
+#define SCALE_MIXOLYDIAN 4  // Mixolydian
+#define SCALE_AEOLIAN 5     // Natural Minor
+#define SCALE_LOCRIAN 6     // Locrian
+#define SCALE_POWER5 7      // Power 5
+#define SCALE_POWER8 8      // Power 8
+bool diatonicIsMajor = true;        // wird für Kompatibilität beibehalten
 
 // Diatonische Akkord-Einstellungen
 int diatonicRootKey = 0;            // 0-11 entspricht C-B
@@ -124,10 +146,9 @@ const int chordDefinitions[7][3] = {
   {0, 3, 6}     // 6 = Diminished
 };
 
-// Diatonische Muster für Dur und Moll
+// Diatonisches Muster (nur eins nötig - Minor wird durch Index-Verschiebung erzielt)
 // Index 0-6 entspricht den Stufen der Tonleiter (I-VII)
-const int diatonicPatternMajor[7] = {0, 1, 1, 0, 0, 1, 6};  // Major, minor, minor, Major, Major, minor, Dim
-const int diatonicPatternMinor[7] = {1, 6, 0, 1, 1, 0, 0};  // minor, Dim, Major, minor, minor, Major, Major
+const int diatonicPattern[7] = {0, 1, 1, 0, 0, 1, 6};  // Major, minor, minor, Major, Major, minor, Dim
 
 // Hilfsfunktion um diatonischen Akkordtyp zu berechnen
 // switchIndex: 0-12 (C bis C)
@@ -152,10 +173,13 @@ int getDiatonicChordType(int switchIndex) {
   }
   
   // Gebe den Akkordtyp basierend auf dem Muster zurück
-  if (diatonicIsMajor) {
-    return diatonicPatternMajor[diatonicDegree];
+  if (scaleType >= 0 && scaleType <= 6) {
+    // Verwende Index-Verschiebung für alle 7 diatonischen Modi
+    int modalIndex = (diatonicDegree + scaleType) % 7;
+    return diatonicPattern[modalIndex];
   } else {
-    return diatonicPatternMinor[diatonicDegree];
+    // Fallback für nicht-diatonische Modi
+    return 0; // Major
   }
 }
 
@@ -164,28 +188,44 @@ int getChordNote(int switchIndex, int variationType, int noteIndex) {
   int chordDefIndex;
   
   switch(variationType % NUM_SCALE_TYPES) {
-    case 0:  // Diatonic Major
-      diatonicIsMajor = true;
+    case SCALE_IONIAN:     // Ionian (Major)
+    case SCALE_DORIAN:     // Dorian
+    case SCALE_PHRYGIAN:   // Phrygian
+    case SCALE_LYDIAN:     // Lydian
+    case SCALE_MIXOLYDIAN: // Mixolydian
+    case SCALE_AEOLIAN:    // Aeolian (Natural Minor)
+    case SCALE_LOCRIAN:    // Locrian
       chordDefIndex = getDiatonicChordType(switchIndex);
       break;
-    case 1:  // Diatonic Minor
-      diatonicIsMajor = false;
-      chordDefIndex = getDiatonicChordType(switchIndex);
+    case SCALE_POWER5:     // Power 5
+      chordDefIndex = 2;   // Power 5 (0, 7, -1)
       break;
-    case 2:  // Power 5
-      chordDefIndex = 2;  // Power 5 (0, 7, -1)
-      break;
-    case 3:  // Power 8
-      chordDefIndex = 3;  // Power 8 (0, 7, 12)
+    case SCALE_POWER8:     // Power 8
+      chordDefIndex = 3;   // Power 8 (0, 7, 12)
       break;
     default:
-      chordDefIndex = 0;  // Major
+      chordDefIndex = 0;   // Major
   }
   
   return chordDefinitions[chordDefIndex][noteIndex];
 }
 
 bool chordNotesActive[NUM_SWITCHES];  // Speichert ob Akkord-Noten für einen Switch aktiv sind
+
+// Hilfsfunktion um zu prüfen ob eine Note in der diatonischen Tonleiter ist
+bool isDiatonicNote(int switchIndex) {
+  int noteOffset = (midiNotes[switchIndex] - diatonicRootKey + 12) % 12;
+  
+  if (scaleType >= 0 && scaleType <= 6) {
+    // Alle diatonischen Modi verwenden dieselben 7 Töne
+    // C-Dur-Tonleiter: C D E F G A B (0, 2, 4, 5, 7, 9, 11)
+    return (noteOffset == 0 || noteOffset == 2 || noteOffset == 4 || 
+            noteOffset == 5 || noteOffset == 7 || noteOffset == 9 || noteOffset == 11);
+  }
+  
+  // Für Power Modes alle Noten erlauben
+  return true;
+}
 
 // Funktions-Schalter (4 Schalter an A1-A4)
 const int NUM_FUNCTION_SWITCHES = 4;
@@ -373,12 +413,25 @@ void setLED(int switchIndex, bool on) {
   }
 }
 
+// LED-Anzeige für Oktave-Wechsel (LED 1-8 entspricht Oktave 0-7)
+void showOctaveLED(int octave) {
+  if (octave < 0 || octave > 7) return;  // Gültige Oktaven: 0-7
+  
+  // Alle LEDs ausschalten
+  pixels.clear();
+  
+  // LED für aktuelle Oktave leuchten lassen
+  pixels.setPixelColor(octave, INDEX_PALETTE[octave % 8]);
+  pixels.show();
+}
+
 // Erhöhe Oktave
 void incrementOctave() {
   if (currentOctave < 7) {  // MIDI max Oktave 7
     currentOctave++;
     Serial.print("Oktave erhöht auf: ");
     Serial.println(currentOctave);
+    showOctaveLED(currentOctave);  // LED-Anzeige für neue Oktave
   }
 }
 
@@ -388,6 +441,7 @@ void decrementOctave() {
     currentOctave--;
     Serial.print("Oktave gesenkt auf: ");
     Serial.println(currentOctave);
+    showOctaveLED(currentOctave);  // LED-Anzeige für neue Oktave
   }
 }
 
@@ -420,6 +474,21 @@ void toggleChordMode() {
 
 // Spiele Akkord mit Octave Folding (Töne werden in der Range gehalten)
 void playChordFolded(int switchIndex, bool on) {
+  // Bei diatonischen Modi (0-6): Prüfe ob Note diatonisch ist
+  if (scaleType >= 0 && scaleType <= 6 && !isDiatonicNote(switchIndex)) {
+    // Nicht-diatonische Note - ignorieren oder LED ausschalten
+    if (on) {
+      // Visueller Hinweis: LED kurz rot blinken für deaktivierte Note
+      int ledIndex = ledMapping[switchIndex];
+      pixels.setPixelColor(ledIndex, pixels.Color(0, 20, 0)); // Rot
+      pixels.show();
+      delay(100);
+      pixels.setPixelColor(ledIndex, pixels.Color(0, 0, 0)); // Aus
+      pixels.show();
+    }
+    return; // Beende Funktion ohne Akkord zu spielen
+  }
+  
   // Berechne die Basis-MIDI-Note für diesen Switch
   int baseNote = midiNotes[switchIndex] + (currentOctave * 12);
   
@@ -540,6 +609,21 @@ void playChordFolded(int switchIndex, bool on) {
 
 // Spiele Akkord für einen Switch (on=true) oder schalte ihn aus (on=false)
 void playChord(int switchIndex, bool on) {
+  // Bei diatonischen Modi (0-6): Prüfe ob Note diatonisch ist
+  if (scaleType >= 0 && scaleType <= 6 && !isDiatonicNote(switchIndex)) {
+    // Nicht-diatonische Note - ignorieren oder LED ausschalten
+    if (on) {
+      // Visueller Hinweis: LED kurz rot blinken für deaktivierte Note
+      int ledIndex = ledMapping[switchIndex];
+      pixels.setPixelColor(ledIndex, pixels.Color(0, 20, 0)); // Rot
+      pixels.show();
+      delay(100);
+      pixels.setPixelColor(ledIndex, pixels.Color(0, 0, 0)); // Aus
+      pixels.show();
+    }
+    return; // Beende Funktion ohne Akkord zu spielen
+  }
+  
   // Berechne die Basis-MIDI-Note für diesen Switch
   int baseNote = midiNotes[switchIndex] + (currentOctave * 12);
   
