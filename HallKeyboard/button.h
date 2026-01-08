@@ -16,6 +16,10 @@ class Button {
     bool previousState;
     unsigned long pressTime = 0; // Zeitpunkt, zu dem der Button zuletzt gedrückt wurde
     const unsigned long holdDuration = 1000; // Mindestdauer in Millisekunden, die der Button gedrückt sein muss
+    
+    // Debounce-Zustand: trackiert den stabilen Zustand des Buttons
+    bool stableState = HIGH; // Der zuletzt stabile Zustand (HIGH = nicht gedrückt)
+    uint8_t debounceCounter = 0; // Zählt stabile Samples
 
 
   public:
@@ -39,11 +43,29 @@ class Button {
 
 /*!
     @brief   Simply debounce a button.
-    @return  True for a short impulse when the button is pressed.
+    @details Erkennt einen Button-Druck sofort (wenn erstes Byte high ist) und verhindert
+             falsche Zustandsänderungen während des Einschwungs durch n konsistente Samples.
+    @return  True für kurzen Impuls wenn der Button gedrückt wird.
 */
-     bool debounce() {
-      state = (state<<1) | digitalRead(_pin) | 0xfe000000;
-      return (state == 0xffff0000);
+    bool debounce() {
+      bool currentInput = digitalRead(_pin);
+      
+      // Wenn sich der Input vom stabilen Zustand unterscheidet
+      if (currentInput != stableState) {
+        debounceCounter++;
+        // Wenn wir 16 konsistente Samples haben, stabilisiert sich der Zustand
+        if (debounceCounter >= 16) {
+          stableState = currentInput;
+          debounceCounter = 0;
+          // Gebe true zurück wenn der Button gerade gedrückt wurde (HIGH zu LOW)
+          return (currentInput == LOW);
+        }
+      } else {
+        // Input ist wieder stabil, Reset
+        debounceCounter = 0;
+      }
+      
+      return false;
     }
      bool trigger() {
       triggerState = (triggerState<<1) | digitalRead(_pin) | 0xfe000000;
