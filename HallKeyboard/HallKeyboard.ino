@@ -19,20 +19,24 @@ const int NUM_SWITCHES = 13;
 // WS2812 LED Konfiguration
 const int NUM_LEDS = 8;              // 8 WS2812 LEDs
 const int LED_PIN = A5;              // Pin A5 als Digital
-const int LED_BRIGHTNESS = 255;       // LED Helligkeit (0-255)
-const int WHITE_KEY_COLOR = 0xFFFFFF;   // Farbe für weiße Tasten
-const int BLACK_KEY_COLOR = 0x8B8BFF;   // Farbe für schwarze Tasten
+const int LED_BRIGHTNESS = 55;      // LED Helligkeit (0-255)
 
-// Index-Palette Farben für Controller-Modus und Submenu-System (GRB Format für WS2812)
+// Farben als RGB-Hex, werden mit pixels.Color() korrekt zu GRB konvertiert
+const uint32_t WHITE_KEY_COLOR = 0xFFFFFF;   // Weiß für weiße Tasten
+const uint32_t BLACK_KEY_COLOR = 0xFF69B4;   // Hot Pink für schwarze Tasten
+
+// Index-Palette Farben für Controller-Modus und Submenu-System
+// Reine, vollgesättigte RGB-Farben (mit Rot-Grün Tausch korrigiert)
+// Format: 0xRRGGBB - Rot und Grün sind im System getauscht, daher entsprechend angepasst
 const uint32_t INDEX_PALETTE[8] = {
-  0x69FF61,  // Index 1 - Rot/Rosa (#ff6961 RGB -> GRB)
-  0xB4FF80,  // Index 2 - Orange (#ffb480 RGB -> GRB)
-  0xF3F88D,  // Index 3 - Gelb (#f8f38d RGB -> GRB)
-  0xD642A4,  // Index 4 - Türkis/Grün (#42d6a4 RGB -> GRB)
-  0xCA08D1,  // Index 5 - Cyan/Blau (#08cad1 RGB -> GRB)
-  0xAD59F6,  // Index 6 - Himmelblau (#59adf6 RGB -> GRB)
-  0x949DFF,  // Index 7 - Violett (#9d94ff RGB -> GRB)
-  0x80C7E8   // Index 8 - Magenta/Pink (#c780e8 RGB -> GRB)
+  0x00FF00,  // Index 0 - Rot (wird als Rot angezeigt nach Tausch)
+  0xFFFF00,  // Index 1 - Gelb (bleibt Gelb)
+  0xFF0000,  // Index 2 - Grün (wird als Grün angezeigt nach Tausch)
+  0xFF00FF,  // Index 3 - Cyan (wird als Cyan angezeigt nach Tausch)
+  0x0000FF,  // Index 4 - Blau (bleibt Blau)
+  0x00FFFF,  // Index 5 - Magenta (wird als Magenta angezeigt nach Tausch)
+  0xFFFFFF,  // Index 6 - Weiß (bleibt Weiß)
+  0x7FFF00   // Index 7 - Orange (Rot+Grün, angepasst für Tausch)
 };
 
 Adafruit_NeoPixel pixels(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
@@ -300,8 +304,8 @@ void updateConfirmationBlink() {
           confirmationSwitchIndex = -1;
         }
       } else {
-        // Nutze Index-Palette Farbe für Bestätigung
-        pixels.setPixelColor(ledIndex, INDEX_PALETTE[0]); // Rot
+        // Nutze Index-Palette Farbe für Bestätigung (bereits in GRB)
+        pixels.setPixelColor(ledIndex, INDEX_PALETTE[0]);
       }
       blinkState = !blinkState;
       pixels.show();
@@ -323,6 +327,12 @@ void updateIdleStatus() {
   // Prüfe Oktave-LED Timeout
   if (octaveLEDActive && millis() - octaveLEDStartTime >= OCTAVE_LED_DURATION) {
     octaveLEDActive = false;
+  }
+  
+  // Wenn wir im Submenu sind, bleibe IMMER idle (zeige Controller-LEDs)
+  if (inSubmenu) {
+    isIdle = true;
+    return;
   }
   
   // Wenn nicht idle, prüfe ob wir zu idle wechseln können
@@ -438,9 +448,35 @@ void setup() {
   
   // WS2812 LEDs initialisieren
   pixels.begin();
-  pixels.setBrightness(LED_BRIGHTNESS);  // Helligkeit zentral einstellen
+  pixels.setBrightness(LED_BRIGHTNESS);  // Helligkeit einstellen
   pixels.clear();
   pixels.show();
+  
+  // Bootup: Regenbogen-Animation von links nach rechts über alle LEDs mit Fade In/Out
+  Serial.println("\nBootup Regenbogen-Animation (von links nach rechts mit Fade)...");
+  for (int led = 0; led < NUM_LEDS; led++) {
+    // Fade In
+    for (int brightness = 0; brightness <= LED_BRIGHTNESS; brightness += 10) {
+      pixels.clear();
+      pixels.setBrightness(brightness);
+      pixels.setPixelColor(led, INDEX_PALETTE[led % 8]);
+      pixels.show();
+      delay(20);
+    }
+    
+    // Fade Out
+    for (int brightness = LED_BRIGHTNESS; brightness >= 0; brightness -= 10) {
+      pixels.clear();
+      pixels.setBrightness(brightness);
+      pixels.setPixelColor(led, INDEX_PALETTE[led % 8]);
+      pixels.show();
+      delay(20);
+    }
+  }
+  pixels.setBrightness(LED_BRIGHTNESS);  // Helligkeit zurücksetzen
+  pixels.clear();
+  pixels.show();
+  Serial.println("Bootup Animation fertig!\n");
   
   // Serial Monitor starten
   Serial.begin(9600);
@@ -546,17 +582,11 @@ void setLED(int switchIndex, bool on) {
       uint32_t color;
       
       if (isBlackKey[switchIndex]) {
-        // Schwarze Taste: Farbe aus BLACK_KEY_COLOR (Helligkeit wird durch setBrightness() geregelt)
-        uint8_t r = (BLACK_KEY_COLOR >> 16) & 0xFF;
-        uint8_t g = (BLACK_KEY_COLOR >> 8) & 0xFF;
-        uint8_t b = BLACK_KEY_COLOR & 0xFF;
-        color = pixels.Color(r, g, b);
+        // Schwarze Taste: Nutze BLACK_KEY_COLOR direkt (wird automatisch zu GRB konvertiert)
+        color = BLACK_KEY_COLOR;
       } else {
-        // Weiße Taste: Farbe aus WHITE_KEY_COLOR (Helligkeit wird durch setBrightness() geregelt)
-        uint8_t r = (WHITE_KEY_COLOR >> 16) & 0xFF;
-        uint8_t g = (WHITE_KEY_COLOR >> 8) & 0xFF;
-        uint8_t b = WHITE_KEY_COLOR & 0xFF;
-        color = pixels.Color(r, g, b);
+        // Weiße Taste: Nutze WHITE_KEY_COLOR direkt (wird automatisch zu GRB konvertiert)
+        color = WHITE_KEY_COLOR;
       }
       pixels.setPixelColor(ledIndex, color);
     } else {
@@ -574,15 +604,9 @@ void setLED(int switchIndex, bool on) {
         uint32_t color;
         
         if (isBlackKey[otherActiveSwitch]) {
-          uint8_t r = (BLACK_KEY_COLOR >> 16) & 0xFF;
-          uint8_t g = (BLACK_KEY_COLOR >> 8) & 0xFF;
-          uint8_t b = BLACK_KEY_COLOR & 0xFF;
-          color = pixels.Color(r, g, b);
+          color = BLACK_KEY_COLOR;
         } else {
-          uint8_t r = (WHITE_KEY_COLOR >> 16) & 0xFF;
-          uint8_t g = (WHITE_KEY_COLOR >> 8) & 0xFF;
-          uint8_t b = WHITE_KEY_COLOR & 0xFF;
-          color = pixels.Color(r, g, b);
+          color = WHITE_KEY_COLOR;
         }
         pixels.setPixelColor(ledIndex, color);
       } else {
@@ -622,7 +646,7 @@ void showOctaveLED(int octave) {
   // Alle LEDs ausschalten
   pixels.clear();
   
-  // LED für aktuelle Oktave leuchten lassen
+  // LED für aktuelle Oktave leuchten lassen (bereits in GRB)
   pixels.setPixelColor(octave, INDEX_PALETTE[octave % 8]);
   pixels.show();
 }
@@ -928,6 +952,7 @@ void enterSubmenu(int submenuNumber) {
   currentSubmenu = submenuNumber;
   submenuIndex = 0;
   submenuChanged = true;
+  isIdle = true;  // Sorge dafür, dass Controller-LEDs angezeigt werden
   
   switch(submenuNumber) {
     case 1: // Play Mode Submenu
