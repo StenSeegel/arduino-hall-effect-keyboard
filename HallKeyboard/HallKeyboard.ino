@@ -727,15 +727,18 @@ void handleFunctionSwitches() {
         // FS2 allein: Toggle Akkord-Modus (nur wenn keine Kombination ausgeführt wurde)
         if (!fs2CombinationHandled) {
           toggleChordMode();
+        } else {
+          Serial.println(">>> FS2 Kombination - toggleChordMode() übersprungen");
         }
         // Flag zurücksetzen beim FS2 Release
         fs2CombinationHandled = false;
       } else if (i == 2) {
         // FS3 (A3) Handler - aber nur wenn nicht mit FS2 kombiniert
-        // (FS2+FS3 Kombination wird bereits im Loop behandelt)
         if (!fs3CombinationHandled) {
           // FS3 allein: Oktave runter
           decrementOctave();
+        } else {
+          Serial.println(">>> FS3 Kombination - decrementOctave() übersprungen");
         }
         // Flag zurücksetzen beim FS3 Release
         fs3CombinationHandled = false;

@@ -38,6 +38,10 @@ class Button {
     bool lastStableState;                   ///< Previous stable state for change detection
     uint8_t debounceCounter;                ///< Counter for stable samples during debouncing
     
+    // === Single-Trigger State Management ===
+    bool triggerFired;                      ///< Prevents multiple trigger events
+    bool releaseFired;                      ///< Prevents multiple release events
+    
     // === Hold Detection ===
     unsigned long pressTime;                ///< Timestamp when button was last pressed
     static const unsigned long holdDuration = 1000; ///< Minimum hold duration in milliseconds
@@ -81,6 +85,10 @@ class Button {
       lastStableState = HIGH;
       debounceCounter = 0;
       
+      // Initialize single-trigger state
+      triggerFired = false;
+      releaseFired = false;
+      
       // Initialize timing and analog variables
       pressTime = 0;
       rotaryPosition = 0;
@@ -106,7 +114,7 @@ class Button {
       if (currentInput != stableState) {
         debounceCounter++;
         
-        // Require 16 consistent samples before accepting state change
+        // Require 16 consistent samples before accepting state change (prevents ghost triggers)
         if (debounceCounter >= 16) {
           lastStableState = stableState;     // Store previous state for change detection
           stableState = currentInput;        // Update to new stable state
@@ -127,29 +135,51 @@ class Button {
     }
 
     /*!
-     * @brief Fast bit-shift debounced trigger detection
+     * @brief Robust trigger detection based on stable state changes
      * @return True for single pulse when button is pressed (HIGH->LOW)
-     * @details Uses bit-shift register for extremely fast debouncing.
-     *          Pattern 0xffff0000 indicates: 16 HIGH samples followed by 16 LOW samples.
-     *          Ideal for immediate response to button presses in main loop.
+     * @details Uses stable debounced state for reliable edge detection.
+     *          Much more reliable than bit-shift register approach.
      */
     bool trigger() {
-      triggerState = (triggerState << 1) | digitalRead(_pin) | 0xfe000000;
-      return (triggerState == 0xffff0000);
+      // Update the stable state through debouncing
+      debounce();
+      
+      // Detect HIGH->LOW transition (button press)
+      if (lastStableState == HIGH && stableState == LOW && !triggerFired) {
+        triggerFired = true;
+        return true;
+      }
+      
+      // Reset trigger flag when button is released
+      if (stableState == HIGH) {
+        triggerFired = false;
+      }
+      
+      return false;
     }
 
     /*!
-     * @brief Detect button release events
+     * @brief Robust release detection based on stable state changes
      * @return True for single pulse when button is released (LOW->HIGH)
-     * @details Uses inverted bit-shift register to detect release transitions.
-     *          Inverts the input so LOW becomes HIGH for pattern detection.
-     *          Perfect for detecting when user stops pressing button.
+     * @details Uses stable debounced state for reliable edge detection.
+     *          Much more reliable than inverted bit-shift approach.
      */
     bool released() {
-      // Invert the input: LOW (pressed) becomes HIGH, HIGH (released) becomes LOW
-      bool invertedInput = !digitalRead(_pin);
-      releaseState = (releaseState << 1) | invertedInput | 0xfe000000;
-      return (releaseState == 0xffff0000);
+      // Update the stable state through debouncing
+      debounce();
+      
+      // Detect LOW->HIGH transition (button release)
+      if (lastStableState == LOW && stableState == HIGH && !releaseFired) {
+        releaseFired = true;
+        return true;
+      }
+      
+      // Reset release flag when button is pressed
+      if (stableState == LOW) {
+        releaseFired = false;
+      }
+      
+      return false;
     }
 
     /*!
