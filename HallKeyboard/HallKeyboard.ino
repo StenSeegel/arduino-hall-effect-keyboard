@@ -302,10 +302,14 @@ void updateConfirmationBlink() {
         blinkCounter++;
         if (blinkCounter >= 3) {
           confirmationSwitchIndex = -1;
+          // Stelle Controller-LEDs (Index-Marker) wieder her, wenn Blinken fertig
+          updateControllerLEDs();
+          return;
         }
       } else {
-        // Nutze Index-Palette Farbe für Bestätigung (bereits in GRB)
-        pixels.setPixelColor(ledIndex, INDEX_PALETTE[0]);
+        // Nutze die entsprechende Tastenfarbe für Bestätigung
+        uint32_t blinkColor = isBlackKey[confirmationSwitchIndex] ? BLACK_KEY_COLOR : WHITE_KEY_COLOR;
+        pixels.setPixelColor(ledIndex, blinkColor);
       }
       blinkState = !blinkState;
       pixels.show();
@@ -453,7 +457,6 @@ void setup() {
   pixels.show();
   
   // Bootup: Regenbogen-Animation von links nach rechts über alle LEDs mit Fade In/Out
-  Serial.println("\nBootup Regenbogen-Animation (von links nach rechts mit Fade)...");
   for (int led = 0; led < NUM_LEDS; led++) {
     // Fade In
     for (int brightness = 0; brightness <= LED_BRIGHTNESS; brightness += 10) {
@@ -476,7 +479,6 @@ void setup() {
   pixels.setBrightness(LED_BRIGHTNESS);  // Helligkeit zurücksetzen
   pixels.clear();
   pixels.show();
-  Serial.println("Bootup Animation fertig!\n");
   
   // Serial Monitor starten
   Serial.begin(9600);
@@ -490,20 +492,6 @@ void setup() {
   
   
   // Debug: Zeige initiale Pin-Zustände
-  Serial.println("\nInitiale Pin-Zustände:");
-  for (int i = 0; i < NUM_SWITCHES; i++) {
-    int state = digitalRead(switchPins[i]);
-    Serial.print("Switch ");
-    Serial.print(i);
-    Serial.print(" (Pin ");
-    Serial.print(switchPins[i]);
-    Serial.print("): ");
-    Serial.println(state == HIGH ? "HIGH" : "LOW");
-  }
-  Serial.println("-----------------------------------\n");
-  
-  
-  Serial.println("Funktions-Schalter mit Button Library initialisiert");
 }
 
 // MIDI Note On/Off Funktion
@@ -665,8 +653,6 @@ void incrementOctave() {
 void decrementOctave() {
   if (currentOctave > 0) {  // MIDI min Oktave 0
     currentOctave--;
-    Serial.print("Oktave gesenkt auf: ");
-    Serial.println(currentOctave);
     showOctaveLED(currentOctave);  // LED-Anzeige für neue Oktave
   }
 }
@@ -684,18 +670,6 @@ void toggleChordMode() {
   // Zyklisiere durch die Modi
   chordModeType = (chordModeType + 1) % 3;  // 0 -> 1 -> 2 -> 0
   
-  Serial.print("Akkord Modus: ");
-  switch(chordModeType) {
-    case CHORD_MODE_OFF:
-      Serial.println("OFF");
-      break;
-    case CHORD_MODE_EXTENDED:
-      Serial.println("EXTENDED (Töne über Range möglich)");
-      break;
-    case CHORD_MODE_FOLDED:
-      Serial.println("FOLDED (Töne werden nach unten gefaltet)");
-      break;
-  }
 }
 
 // Helper-Funktion um Akkordnoten abzuschalten mit LED-Management
@@ -762,19 +736,19 @@ void turnOnChordNotes(int switchIndex, bool isFolded) {
   }
   
   // Debug-Output
-  Serial.print("Switch ");
-  Serial.print(switchIndex);
-  Serial.print(" - Akkord: ");
-  switch(chordDefIndex) {
-    case 0: Serial.println("Major"); break;
-    case 1: Serial.println("Minor"); break;
-    case 2: Serial.println("Power 5"); break;
-    case 3: Serial.println("Power 8"); break;
-    case 4: Serial.println("Sus4"); break;
-    case 5: Serial.println("Augmented"); break;
-    case 6: Serial.println("Diminished"); break;
-    default: Serial.println("Unknown"); break;
-  }
+  //Serial.print("Switch ");
+  //Serial.print(switchIndex);
+  //Serial.print(" - Akkord: ");
+  //switch(chordDefIndex) {
+  //  case 0: Serial.println("Major"); break;
+  //  case 1: Serial.println("Minor"); break;
+  //  case 2: Serial.println("Power 5"); break;
+  //  case 3: Serial.println("Power 8"); break;
+  //  case 4: Serial.println("Sus4"); break;
+  //  case 5: Serial.println("Augmented"); break;
+  //  case 6: Serial.println("Diminished"); break;
+  //  default: Serial.println("Unknown"); break;
+  //}
   
   const uint32_t OUT_OF_RANGE_COLOR = 0x0000FF;  // Blau
   
@@ -784,14 +758,13 @@ void turnOnChordNotes(int switchIndex, bool isFolded) {
       int chordNote = baseNote + noteOffset;
       
       // Falte/passe Note an je nach Modus
-      bool isOutOfRange = false;
       if (isFolded) {
         while (chordNote > (currentOctave + 1) * 12) chordNote -= 12;
         while (chordNote < currentOctave * 12) chordNote += 12;
-      } else {
-        if (chordNote > (currentOctave + 1) * 12) isOutOfRange = true;
-        else if (chordNote < currentOctave * 12) isOutOfRange = true;
       }
+      
+      // Prüfe ob Note außerhalb des Bereichs ist
+      bool isOutOfRange = (chordNote < currentOctave * 12) || (chordNote > (currentOctave + 1) * 12);
       
       noteOn(0x90, chordNote, 0x45);  // Note On mit velocity
       
@@ -884,11 +857,11 @@ void handleFunctionSwitches() {
     if (functionSwitches[i].released()) {
       unsigned long pressDuration = millis() - functionSwitchPressTime[i];
       
-      Serial.print("Function Switch ");
-      Serial.print(i + 1);
-      Serial.print(" RELEASED (Duration: ");
-      Serial.print(pressDuration);
-      Serial.println("ms)");
+    //  Serial.print("Function Switch ");
+    //  Serial.print(i + 1);
+    //  Serial.print(" RELEASED (Duration: ");
+    //  Serial.print(pressDuration);
+    //  Serial.println("ms)");
       
       // Nur Short-Press verarbeiten wenn kein Long-Press ausgeführt wurde
       if (!functionSwitchLongPressed[i]) {
