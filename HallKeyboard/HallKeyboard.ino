@@ -276,6 +276,13 @@ int blinkCounter = 0;
 bool blinkState = false;
 int confirmationSwitchIndex = -1;    // Welcher Switch bestätigt werden soll
 
+// Multi-Note Blink Tracking - für LEDs mit mehreren aktiven Noten
+int ledMultiNoteCount[NUM_LEDS];     // Anzahl aktiver Noten pro LED
+int ledMultiNoteSwitches[NUM_LEDS][2]; // Die zwei aktiven Switch-Indizes (für Farbwechsel)
+unsigned long lastLEDBlinkTime = 0;
+bool ledBlinkState = false;
+const unsigned long LED_BLINK_INTERVAL = 250;  // 250ms zwischen Farbwechsel
+
 // Oktave-LED Anzeige Timing
 bool octaveLEDActive = false;
 unsigned long octaveLEDStartTime = 0;
@@ -314,6 +321,38 @@ void updateConfirmationBlink() {
       blinkState = !blinkState;
       pixels.show();
     }
+  }
+}
+
+// Update LED-Blinken für mehrere Noten auf gleicher LED
+void updateLEDMultiNoteBlink() {
+  unsigned long currentTime = millis();
+  if (currentTime - lastLEDBlinkTime >= LED_BLINK_INTERVAL) {
+    lastLEDBlinkTime = currentTime;
+    ledBlinkState = !ledBlinkState;
+    
+    // Aktualisiere alle LEDs mit mehreren Noten
+    for (int ledIndex = 0; ledIndex < NUM_LEDS; ledIndex++) {
+      // Zähle aktive Noten für diese LED neu
+      int activeCount = 0;
+      int activeSwitches[2];
+      for (int i = 0; i < NUM_SWITCHES; i++) {
+        if (ledMapping[i] == ledIndex && (switches[i].isDown() || heldNotes[i])) {
+          if (activeCount < 2) {
+            activeSwitches[activeCount] = i;
+          }
+          activeCount++;
+        }
+      }
+      
+      // Blinke nur wenn 2 oder mehr Noten aktiv sind
+      if (activeCount >= 2) {
+        int switchIndex = ledBlinkState ? activeSwitches[0] : activeSwitches[1];
+        uint32_t color = isBlackKey[switchIndex] ? BLACK_KEY_COLOR : WHITE_KEY_COLOR;
+        pixels.setPixelColor(ledIndex, color);
+      }
+    }
+    pixels.show();
   }
 }
 
@@ -426,6 +465,13 @@ void setup() {
   for (int i = 0; i < NUM_SWITCHES; i++) {
     switches[i].begin(switchPins[i]);
     heldNotes[i] = false;
+  }
+  
+  // Multi-Note Blink Tracking initialisieren
+  for (int i = 0; i < NUM_LEDS; i++) {
+    ledMultiNoteCount[i] = 0;
+    ledMultiNoteSwitches[i][0] = -1;
+    ledMultiNoteSwitches[i][1] = -1;
   }
   
   // Analog Pins als Digital mit Pullup ZUERST konfigurieren
@@ -577,13 +623,30 @@ void setLED(int switchIndex, bool on) {
         color = WHITE_KEY_COLOR;
       }
       pixels.setPixelColor(ledIndex, color);
+      
+      // Update Multi-Note Tracking
+      ledMultiNoteCount[ledIndex] = 0;
+      ledMultiNoteSwitches[ledIndex][0] = -1;
+      ledMultiNoteSwitches[ledIndex][1] = -1;
+      for (int i = 0; i < NUM_SWITCHES; i++) {
+        if (ledMapping[i] == ledIndex && (switches[i].isDown() || heldNotes[i])) {
+          if (ledMultiNoteCount[ledIndex] < 2) {
+            ledMultiNoteSwitches[ledIndex][ledMultiNoteCount[ledIndex]] = i;
+          }
+          ledMultiNoteCount[ledIndex]++;
+        }
+      }
     } else {
       // Vor dem Ausschalten prüfen, ob noch andere Switches diese LED steuern
+      // Prüfe sowohl gedrückte Tasten als auch gehaltene Noten (für additiven Hold Mode)
       int otherActiveSwitch = -1;
       for (int i = 0; i < NUM_SWITCHES; i++) {
-        if (i != switchIndex && switches[i].isDown() && ledMapping[i] == ledIndex) {
-          otherActiveSwitch = i;
-          break;
+        if (i != switchIndex && ledMapping[i] == ledIndex) {
+          // Prüfe ob Taste gedrückt oder Note gehälten wird
+          if (switches[i].isDown() || heldNotes[i]) {
+            otherActiveSwitch = i;
+            break;
+          }
         }
       }
       
@@ -597,9 +660,27 @@ void setLED(int switchIndex, bool on) {
           color = WHITE_KEY_COLOR;
         }
         pixels.setPixelColor(ledIndex, color);
+        
+        // Update Multi-Note Tracking
+        ledMultiNoteCount[ledIndex] = 0;
+        ledMultiNoteSwitches[ledIndex][0] = -1;
+        ledMultiNoteSwitches[ledIndex][1] = -1;
+        for (int i = 0; i < NUM_SWITCHES; i++) {
+          if (ledMapping[i] == ledIndex && (switches[i].isDown() || heldNotes[i])) {
+            if (ledMultiNoteCount[ledIndex] < 2) {
+              ledMultiNoteSwitches[ledIndex][ledMultiNoteCount[ledIndex]] = i;
+            }
+            ledMultiNoteCount[ledIndex]++;
+          }
+        }
       } else {
         // Keine andere Taste auf dieser LED, LED ausschalten
         pixels.setPixelColor(ledIndex, pixels.Color(0, 0, 0));
+        
+        // Reset Multi-Note Tracking für diese LED
+        ledMultiNoteCount[ledIndex] = 0;
+        ledMultiNoteSwitches[ledIndex][0] = -1;
+        ledMultiNoteSwitches[ledIndex][1] = -1;
         
         // Prüfe sofort ob zurück in Controller-Modus gewechselt werden soll
         bool hasActiveNotes = false;
@@ -1322,4 +1403,5 @@ void loop() {
   // Update Idle-Status
   updateIdleStatus();
   updateConfirmationBlink();
+  updateLEDMultiNoteBlink();
 }
