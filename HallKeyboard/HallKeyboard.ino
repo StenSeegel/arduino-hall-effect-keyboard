@@ -253,6 +253,7 @@ int currentSubmenu = 0;              // Welches Submenu aktiv ist (1-4)
 int submenuIndex = 0;                // Aktueller Index im Submenu
 int maxSubmenuIndex = 0;             // Max Index für aktuelles Submenu
 bool submenuChanged = false;         // Flag ob Submenu-Status geändert wurde
+int savedOctaveBeforeSubmenu = 3;    // Speichert die Oktave bevor Submenu 4 geöffnet wird
 
 // Play Mode Variablen (für Submenu 1)
 int playModeType = 0;                // 0=Hold, 1=Hold+Additive (Default: Hold)
@@ -358,6 +359,11 @@ void updateLEDMultiNoteBlink() {
 
 // Hilfsfunktion zum Deaktivieren der Controller-LEDs bei Noten-Events
 void disableControllerLEDsForNotes() {
+  // Wenn wir im Submenu sind, behalte die Submenu-LEDs
+  if (inSubmenu) {
+    return;
+  }
+  
   if (isIdle) {
     isIdle = false;
     pixels.clear();
@@ -449,6 +455,12 @@ void exitSubmenu(bool saveChanges);
 void togglePlayMode();
 void togglePlayModeOnOff();
 void toggleChordModeOnOff();
+void setLED(int switchIndex, bool on, bool skipLEDs = false);
+void setLEDWithColor(int switchIndex, bool on, uint32_t customColor = 0xFFFFFF, bool skipLEDs = false);
+void playChord(int switchIndex, bool on, bool skipLEDs = false);
+void playChordFolded(int switchIndex, bool on, bool skipLEDs = false);
+void turnOnChordNotes(int switchIndex, bool isFolded, bool skipLEDs = false);
+void turnOffChordNotes(int switchIndex, bool isFolded, bool skipLEDs = false);
 
 // Funktions-Schalter (4 Schalter an A1-A4)
 const int NUM_FUNCTION_SWITCHES = 4;
@@ -560,7 +572,12 @@ void noteOn(int cmd, int pitch, int velocity) {
 }
 
 // LED Kontrolle für Switch-Index mit optionaler Farbe
-void setLEDWithColor(int switchIndex, bool on, uint32_t customColor = 0xFFFFFF) {
+void setLEDWithColor(int switchIndex, bool on, uint32_t customColor = 0xFFFFFF, bool skipLEDs = false) {
+  // Wenn skipLEDs true ist, setze keine LEDs (z.B. für Submenu Previews)
+  if (skipLEDs) {
+    return;
+  }
+  
   int ledIndex = ledMapping[switchIndex];
   
   // Nur wenn dieser Switch eine LED hat
@@ -595,7 +612,7 @@ void setLEDWithColor(int switchIndex, bool on, uint32_t customColor = 0xFFFFFF) 
       
       if (ledStillActive && otherSwitchIndex >= 0) {
         // Eine andere Note steuert diese LED noch - erneuere ihre Farbe
-        setLED(otherSwitchIndex, true);
+        setLED(otherSwitchIndex, true, skipLEDs);
       } else {
         // Keine andere Note auf dieser LED, LED ausschalten
         pixels.setPixelColor(ledIndex, pixels.Color(0, 0, 0));
@@ -606,7 +623,12 @@ void setLEDWithColor(int switchIndex, bool on, uint32_t customColor = 0xFFFFFF) 
 }
 
 // LED Kontrolle für Switch-Index (weiße und schwarze Tasten mit unterschiedlichen Farben)
-void setLED(int switchIndex, bool on) {
+void setLED(int switchIndex, bool on, bool skipLEDs = false) {
+  // Wenn skipLEDs true ist, setze keine LEDs (z.B. für Submenu Previews)
+  if (skipLEDs) {
+    return;
+  }
+  
   int ledIndex = ledMapping[switchIndex];
   
   // Nur wenn dieser Switch eine LED hat
@@ -754,7 +776,7 @@ void toggleChordMode() {
 }
 
 // Helper-Funktion um Akkordnoten abzuschalten mit LED-Management
-void turnOffChordNotes(int switchIndex, bool isFolded) {
+void turnOffChordNotes(int switchIndex, bool isFolded, bool skipLEDs = false) {
   int baseNote = midiNotes[switchIndex] + (currentOctave * 12);
   
   for (int j = 0; j < maxChordNotes; j++) {
@@ -796,14 +818,14 @@ void turnOffChordNotes(int switchIndex, bool isFolded) {
             if (ledStillActive) break;
           }
         }
-        if (!ledStillActive) setLEDWithColor(displaySwitchIndex, false);
+        if (!ledStillActive) setLEDWithColor(displaySwitchIndex, false, 0xFFFFFF, skipLEDs);
       }
     }
   }
 }
 
 // Helper-Funktion um Akkordnoten anzuschalten mit LED-Ansteuerung
-void turnOnChordNotes(int switchIndex, bool isFolded) {
+void turnOnChordNotes(int switchIndex, bool isFolded, bool skipLEDs = false) {
   int baseNote = midiNotes[switchIndex] + (currentOctave * 12);
   
   // Bestimme Akkordtyp
@@ -854,9 +876,9 @@ void turnOnChordNotes(int switchIndex, bool isFolded) {
       
       if (displaySwitchIndex >= 0 && displaySwitchIndex < NUM_SWITCHES) {
         if (!isFolded && isOutOfRange) {
-          setLEDWithColor(displaySwitchIndex, true, OUT_OF_RANGE_COLOR);
+          setLEDWithColor(displaySwitchIndex, true, OUT_OF_RANGE_COLOR, skipLEDs);
         } else {
-          setLED(displaySwitchIndex, true);
+          setLED(displaySwitchIndex, true, skipLEDs);
         }
       }
     }
@@ -864,7 +886,7 @@ void turnOnChordNotes(int switchIndex, bool isFolded) {
 }
 
 // Spiele Akkord mit Octave Folding (Töne werden in der Range gehalten)
-void playChordFolded(int switchIndex, bool on) {
+void playChordFolded(int switchIndex, bool on, bool skipLEDs = false) {
   // Bei diatonischen Modi (0-6): Prüfe ob Taste diatonisch ist
   if (scaleType >= 0 && scaleType <= 6 && !isDiatonicNote(switchIndex)) {
     // Nicht-diatonische Taste - ignorieren
@@ -880,14 +902,14 @@ void playChordFolded(int switchIndex, bool on) {
   }
   
   if (!on) {
-    turnOffChordNotes(switchIndex, true);
+    turnOffChordNotes(switchIndex, true, skipLEDs);
   } else {
-    turnOnChordNotes(switchIndex, true);
+    turnOnChordNotes(switchIndex, true, skipLEDs);
   }
 }
 
 // Spiele Akkord für einen Switch (on=true) oder schalte ihn aus (on=false)
-void playChord(int switchIndex, bool on) {
+void playChord(int switchIndex, bool on, bool skipLEDs = false) {
   // Bei diatonischen Modi (0-6): Prüfe ob Taste diatonisch ist
   if (scaleType >= 0 && scaleType <= 6 && !isDiatonicNote(switchIndex)) {
     // Nicht-diatonische Taste - ignorieren
@@ -903,9 +925,9 @@ void playChord(int switchIndex, bool on) {
   }
   
   if (!on) {
-    turnOffChordNotes(switchIndex, false);
+    turnOffChordNotes(switchIndex, false, skipLEDs);
   } else {
-    turnOnChordNotes(switchIndex, false);
+    turnOnChordNotes(switchIndex, false, skipLEDs);
   }
 }
 
@@ -930,7 +952,10 @@ void handleFunctionSwitches() {
       if (currentPressTime >= LONG_PRESS_DURATION) {
         // Long-Press erkannt - öffne entsprechendes Submenu
         functionSwitchLongPressed[i] = true;  // Flag setzen
-        enterSubmenu(i + 1);
+        // FS3 (i=2) ist reserviert, nur FS1, FS2, FS4 öffnen Submenus
+        if (i != 2) {
+          enterSubmenu(i + 1);
+        }
       }
     }
     
@@ -970,6 +995,10 @@ void handleShortPress(int fsNumber) {
         if (submenuIndex > 0) {
           submenuIndex--;
           submenuChanged = true;
+          // Für Submenu 4: Aktualisiere Oktave live für Vorschau
+          if (currentSubmenu == 4) {
+            currentOctave = submenuIndex;
+          }
           updateControllerLEDs();
         }
         break;
@@ -977,6 +1006,10 @@ void handleShortPress(int fsNumber) {
         if (submenuIndex < maxSubmenuIndex - 1) {
           submenuIndex++;
           submenuChanged = true;
+          // Für Submenu 4: Aktualisiere Oktave live für Vorschau
+          if (currentSubmenu == 4) {
+            currentOctave = submenuIndex;
+          }
           updateControllerLEDs();
         }
         break;
@@ -990,11 +1023,9 @@ void handleShortPress(int fsNumber) {
       case 2: // FS2: Chord Mode Ein/Aus
         toggleChordModeOnOff();
         break;
-      case 3: // FS3: Oktave runter
-        decrementOctave();
+      case 3: // FS3: Nicht verwendet im Hauptmenü (Long Press für Submenu 3)
         break;
-      case 4: // FS4: Oktave hoch
-        incrementOctave();
+      case 4: // FS4: Nicht verwendet im Hauptmenü (Long Press für Submenu 4)
         break;
     }
   }
@@ -1020,8 +1051,10 @@ void enterSubmenu(int submenuNumber) {
     case 3: // Submenu 3 (noch nicht implementiert)
       maxSubmenuIndex = 1;
       break;
-    case 4: // Submenu 4 (noch nicht implementiert)
-      maxSubmenuIndex = 1;
+    case 4: // Octave Submenu (Oktaven 0-7)
+      maxSubmenuIndex = 8; // Oktaven 0-7
+      submenuIndex = currentOctave;
+      savedOctaveBeforeSubmenu = currentOctave;  // Speichere ursprüngliche Oktave
       break;
   }
   
@@ -1056,12 +1089,21 @@ void exitSubmenu(bool saveChanges) {
           Serial.print("Scale Type gesetzt auf: ");
           Serial.println(scaleType);
         }
-        // Chord Mode automatisch aktivieren wenn Scale Type gewählt wird
-        if (!chordModeActive && scaleType < NUM_SCALE_TYPES) {
-          chordModeActive = true;
-          chordModeType = (scaleType >= SCALE_POWER5) ? CHORD_MODE_EXTENDED : CHORD_MODE_EXTENDED;
-          Serial.println("Chord Mode automatisch aktiviert");
-        }
+        break;
+      case 4: // Octave Submenu
+        // currentOctave wurde bereits live aktualisiert während Navigation
+        showOctaveLED(currentOctave);
+        Serial.print("Oktave gespeichert: ");
+        Serial.println(currentOctave);
+        break;
+    }
+  } else {
+    // Bei Cancel (saveChanges=false): Stelle ursprüngliche Werte wieder her
+    switch(currentSubmenu) {
+      case 4: // Octave Submenu - Stelle ursprüngliche Oktave wieder her
+        currentOctave = savedOctaveBeforeSubmenu;
+        Serial.print("Oktave zurückgesetzt auf: ");
+        Serial.println(currentOctave);
         break;
     }
   }
@@ -1216,14 +1258,14 @@ void toggleAdditiveMode() {
 }
 
 // Setze gehaltenen Akkord (für Hold + Chord Modus kombiniert)
-void setHeldChord(int switchIndex) {
+void setHeldChord(int switchIndex, bool skipLEDs = false) {
   // Prüfe ob dieser Akkord bereits aktiv ist (Toggle)
   if (chordNotesActive[switchIndex]) {
     // Akkord ausschalten
     if (chordModeType == CHORD_MODE_EXTENDED) {
-      playChord(switchIndex, false);
+      playChord(switchIndex, false, skipLEDs);
     } else if (chordModeType == CHORD_MODE_FOLDED) {
-      playChordFolded(switchIndex, false);
+      playChordFolded(switchIndex, false, skipLEDs);
     }
     chordNotesActive[switchIndex] = false;
   } else {
@@ -1231,9 +1273,9 @@ void setHeldChord(int switchIndex) {
     for (int i = 0; i < NUM_SWITCHES; i++) {
       if (i != switchIndex && chordNotesActive[i]) {
         if (chordModeType == CHORD_MODE_EXTENDED) {
-          playChord(i, false);
+          playChord(i, false, skipLEDs);
         } else if (chordModeType == CHORD_MODE_FOLDED) {
-          playChordFolded(i, false);
+          playChordFolded(i, false, skipLEDs);
         }
         chordNotesActive[i] = false;
         Serial.print("Held Chord Off (Switch ");
@@ -1244,9 +1286,9 @@ void setHeldChord(int switchIndex) {
     
     // Neuen Akkord anschalten
     if (chordModeType == CHORD_MODE_EXTENDED) {
-      playChord(switchIndex, true);
+      playChord(switchIndex, true, skipLEDs);
     } else if (chordModeType == CHORD_MODE_FOLDED) {
-      playChordFolded(switchIndex, true);
+      playChordFolded(switchIndex, true, skipLEDs);
     }
     chordNotesActive[switchIndex] = true;
     Serial.print("Held Chord On (Switch ");
@@ -1256,7 +1298,7 @@ void setHeldChord(int switchIndex) {
 }
 
 // Setze gehaltene Note
-void setHeldNote(int note, int switchIndex) {
+void setHeldNote(int note, int switchIndex, bool skipLEDs = false) {
   if (additiveMode) {
     // Additive Modus: mehrere Noten gleichzeitig
     if (heldNotes[switchIndex]) {
@@ -1264,14 +1306,14 @@ void setHeldNote(int note, int switchIndex) {
       noteOn(0x90, note, 0x00);
       Serial.print("Hold Note Off (Additive): ");
       Serial.println(note);
-      setLED(switchIndex, false);
+      setLED(switchIndex, false, skipLEDs);
       heldNotes[switchIndex] = false;
     } else {
       // Note anschalten
       noteOn(0x90, note, 0x45);
       Serial.print("Hold Note On (Additive): ");
       Serial.println(note);
-      setLED(switchIndex, true);
+      setLED(switchIndex, true, skipLEDs);
       heldNotes[switchIndex] = true;
     }
   } else {
@@ -1284,7 +1326,7 @@ void setHeldNote(int note, int switchIndex) {
       // LED für alte Note ausschalten (finde den Switch-Index)
       for (int i = 0; i < NUM_SWITCHES; i++) {
         if ((midiNotes[i] + (currentOctave * 12)) == heldNote) {
-          setLED(i, false);
+          setLED(i, false, skipLEDs);
           break;
         }
       }
@@ -1296,11 +1338,11 @@ void setHeldNote(int note, int switchIndex) {
       noteOn(0x90, note, 0x00);
       Serial.print("Hold Note Off: ");
       Serial.println(note);
-      setLED(switchIndex, false);
+      setLED(switchIndex, false, skipLEDs);
       heldNote = -1;
     } else {
       // Neue Note anschalten
-      setLED(switchIndex, true);
+      setLED(switchIndex, true, skipLEDs);
       heldNote = note;
       noteOn(0x90, note, 0x45);
       Serial.print("Hold Note On: ");
@@ -1325,7 +1367,14 @@ void loop() {
       Serial.print("): PRESSED - Note ");
       Serial.println(currentNote);
       
-      // Im Submenu 2 (Chord Mode): Root Note Auswahl
+      // Im Submenu 1 (Play Mode): Noten-Vorschau spielen
+      if (inSubmenu && currentSubmenu == 1) {
+        // Spiele die Note zur Vorschau
+        noteOn(0x90, currentNote, 0x45);
+        return; // Verlasse loop iteration, normale Verarbeitung überspringen
+      }
+      
+      // Im Submenu 2 (Chord Mode): Root Note Auswahl bei Short Press
       if (inSubmenu && currentSubmenu == 2) {
         diatonicRootKey = midiNotes[i];
         confirmLED(i); // Bestätigungs-Blinken
@@ -1333,6 +1382,48 @@ void loop() {
         const char* noteNames[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
         Serial.println(noteNames[diatonicRootKey]);
         return; // Verlasse loop iteration, normale Note nicht spielen
+      }
+      
+      // Im Submenu 3 (reserviert): Noten-Vorschau spielen
+      if (inSubmenu && currentSubmenu == 3) {
+        // Spiele die Note zur Vorschau
+        noteOn(0x90, currentNote, 0x45);
+        return; // Verlasse loop iteration, normale Verarbeitung überspringen
+      }
+      
+      // Im Submenu 4 (Octave): Vorschau mit aktiven Modi (Chord Mode, Hold Mode)
+      if (inSubmenu && currentSubmenu == 4) {
+        // Wenn Hold Mode aktiv: halte Noten mit skipLEDs=true (keine LEDs setzen)
+        if (holdMode) {
+          if (chordModeActive && chordModeType != CHORD_MODE_OFF) {
+            // Hold + Chord: Akkord halten
+            setHeldChord(i, true);  // skipLEDs=true
+          } else {
+            // Hold Normal: Note halten
+            setHeldNote(currentNote, i, true);  // skipLEDs=true
+          }
+        } else {
+          // Kein Hold Mode: Nur Vorschau
+          if (chordModeActive && chordModeType != CHORD_MODE_OFF) {
+            int baseNote = midiNotes[i] + (currentOctave * 12);
+            // Spiele Akkord-Noten direkt (ohne setLEDWithColor)
+            for (int j = 0; j < maxChordNotes; j++) {
+              int noteOffset = getChordNote(i, scaleType, j);
+              if (noteOffset >= 0) {
+                int chordNote = baseNote + noteOffset;
+                if (chordModeType == CHORD_MODE_FOLDED) {
+                  while (chordNote > (currentOctave + 1) * 12) chordNote -= 12;
+                  while (chordNote < currentOctave * 12) chordNote += 12;
+                }
+                noteOn(0x90, chordNote, 0x45);  // Note On
+              }
+            }
+          } else {
+            // Normal: Spiele einfache Note in der ausgewählten Oktave zur Vorschau
+            noteOn(0x90, currentNote, 0x45);
+          }
+        }
+        return; // Verlasse loop iteration, normale Verarbeitung überspringen
       }
       
       // Akkord Modus: mehrere Noten gleichzeitig
@@ -1376,6 +1467,38 @@ void loop() {
       Serial.print("): RELEASED - Note ");
       Serial.println(currentNote);
       
+      // Im Submenu: Note off zur Vorschau
+      if (inSubmenu && currentSubmenu != 2) {
+        // Submenu 4: Mit Hold Mode wird Release bereits durch den nächsten trigger() gehandhabt
+        if (currentSubmenu == 4) {
+          if (!holdMode && chordModeActive && chordModeType != CHORD_MODE_OFF) {
+            // Nur Preview ohne Hold: Akkord ausschalten
+            int baseNote = midiNotes[i] + (currentOctave * 12);
+            for (int j = 0; j < maxChordNotes; j++) {
+              int noteOffset = getChordNote(i, scaleType, j);
+              if (noteOffset >= 0) {
+                int chordNote = baseNote + noteOffset;
+                
+                if (chordModeType == CHORD_MODE_FOLDED) {
+                  while (chordNote > (currentOctave + 1) * 12) chordNote -= 12;
+                  while (chordNote < currentOctave * 12) chordNote += 12;
+                }
+                
+                noteOn(0x90, chordNote, 0x00);  // Note Off
+              }
+            }
+          } else if (!holdMode) {
+            // Nur Preview ohne Hold: Note ausschalten
+            noteOn(0x90, currentNote, 0x00);
+          }
+          // Mit Hold Mode: Release ist bereits durch den nächsten trigger() (zweiter Druck) gehandhabt
+        } else {
+          // Submenu 1, 3: Note off spielen
+          noteOn(0x90, currentNote, 0x00);
+        }
+        return; // Verlasse loop iteration, normale Verarbeitung überspringen
+      }
+      
       // LED ausschalten (nur im Normal Modus und nicht im Akkord-Modus)
       if (!holdMode && (!chordModeActive || chordModeType == CHORD_MODE_OFF)) {
         setLED(i, false);
@@ -1398,6 +1521,7 @@ void loop() {
   }
   
   // Verarbeite Funktions-Schalter (A1-A4)
+  // Verarbeite Function Switch Events (alle 4 Switches)
   handleFunctionSwitches();
   
   // Update Idle-Status

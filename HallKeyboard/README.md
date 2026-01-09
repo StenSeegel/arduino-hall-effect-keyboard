@@ -21,8 +21,8 @@ Die Funktionstasten verwenden ein **Hauptmenü/Submenu-System**:
 #### Hauptmenü (Short Press)
 - **FS1**: Play Mode (An/Aus + Submenu-Zugang)
 - **FS2**: Akkord Mode (An/Aus + Submenu-Zugang) 
-- **FS3**: Oktave nach unten
-- **FS4**: Oktave nach oben
+- **FS3**: (Reserviert für Submenu 4)
+- **FS4**: (Reserviert für Submenu 4)
 
 #### Submenu-System (Long Press)
 **Aktivierung**: Langes Drücken einer Funktionstaste öffnet das entsprechende Submenu
@@ -106,15 +106,22 @@ Das **LED-System** arbeitet mit zwei verschiedenen Modi:
 - **Index 7 Farbe**: Power 5 Scale aktiv
 - **Index 8 Farbe**: Power 8 Scale aktiv
 
-#### Oktavierung (FS3/FS4)
-**Short Press**: 
-- **FS3**: Oktave nach unten (-1)
-- **FS4**: Oktave nach oben (+1)
-- **Oktav Anzeige**: LED 1-8 entsprechen Low C Noten 0-84 (LED blinkt kurz beim Wechsel)
+#### Oktavierung (FS4)
+**Long Press**: Öffnet Submenu 4 (Oktavumschaltung)
 
-**Long Press**: 
-- **FS3**: Öffnet Submenu 3 (nicht implementiert)
-- **FS4**: Öffnet Submenu 4 (nicht implementiert)
+**Note Preview:**
+- **Note Switches**: Betätigung eines Note Switches spielt Noten in der gewählten Oktave, ohne das Submenu verlassen zu müssen.
+- **Cancel**: Kehrt zur zuletzt aktiven Oktave vor dem Öffnen des Submenüs zurück.
+
+**Submenu 4 - Oktavierungs-Optionen:**
+- **Index 0** (LED 0): **Oktave 0** - Tiefste Oktave (MIDI C0 = Note 0)
+- **Index 1** (LED 1): **Oktave 1** 
+- **Index 2** (LED 2): **Oktave 2**
+- **Index 3** (LED 3): **Oktave 3** - Standardoktave beim Start
+- **Index 4** (LED 4): **Oktave 4** 
+- **Index 5** (LED 5): **Oktave 5** 
+- **Index 6** (LED 6): **Oktave 6** 
+- **Index 7** (LED 7): **Oktave 7** - Höchste Oktave (MIDI C7 = Note 84)
 
 ### Submenu-Navigation
 **In jedem Submenu:**
@@ -198,8 +205,8 @@ Minor → Diminished → Major → Minor → Minor → Major → Major
 |-------|-------------|------------|------------|
 | **FS1** | Play Mode Ein/Aus | Submenu 1 öffnen | LED 1: aus oder ``Index-Palette`` |
 | **FS2** | Akkord Mode Ein/Aus | Submenu 2 öffnen | LED 2: aus oder ``Index-Palette`` |
-| **FS3** | Oktave runter (-1) | (Submenu 3 nicht implementiert) | LED zeigt beim Wechsel die aktuelle Oktave |
-| **FS4** | Oktave hoch (+1) | (Submenu 4 nicht implementiert) | LED zeigt beim Wechsel die aktuelle Oktave |
+| **FS3** | (Reserviert) | Submenu 4 öffnen | LED zeigt aktuellen Index |
+| **FS4** | (Reserviert) | Submenu 4 öffnen | LED zeigt aktuellen Index |
 
 ### Submenu-Navigation
 | Taste | Funktion | Beschreibung |
@@ -209,6 +216,25 @@ Minor → Diminished → Major → Minor → Minor → Major → Major
 | **FS3** | Index runter | Vorherige Option |
 | **FS4** | Index hoch | Nächste Option |
 
+---
+
+## Submenu-Übersicht
+
+### Submenu 1 - Play Mode
+**Optionen**: Hold (Index 0) | Hold + Additive (Index 1)
+- Wähle Play Mode: Navigation mit FS3/FS4
+- Speichere: FS2 (Save & Apply)
+
+### Submenu 2 - Chord Mode / Scale Type
+**Optionen**: Major | Dorian | Phrygian | Lydian | Mixolydian | Minor | Locrian | Power 5 | Power 8
+- Wähle Scale Type: Navigation mit FS3/FS4
+- Setze Root Note: Betätige eine Note-Taste (LED bestätigt 3x Blinken)
+- Speichere: FS2 (Save & Apply)
+
+### Submenu 4 - Octave Selection
+**Optionen**: Oktave 0-7
+- Wähle Oktave: Navigation mit FS3/FS4
+- Speichere: FS2 (Save & Apply)
 
 ---
 
