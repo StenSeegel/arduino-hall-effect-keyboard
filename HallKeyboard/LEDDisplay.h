@@ -71,9 +71,12 @@ void updateLEDDisplay() {
     // LED 0-7 zeigt submenuIndex an
     for (int i = 0; i < NUM_LEDS; i++) {
       if (i == submenuIndex) {
-        uint8_t selectColor = COLOR_MAGENTA_IDX; // Page 0
-        if (currentSubmenuPage == 1) selectColor = COLOR_WHITE_IDX;
-        else if (currentSubmenuPage == 2) selectColor = COLOR_YELLOW_IDX;
+        uint8_t selectColor = COLOR_WHITE_IDX; // Default White
+        
+        // Sonderfall: Wenn Basis-Farbe bereits Weiß ist (Octave Menu), nutze Magenta als Kontrast
+        if (currentSubmenu == 4) {
+          selectColor = COLOR_MAGENTA_IDX;
+        }
         
         setLEDColor(i, selectColor, 255); 
       } else if (i < maxSubmenuIndex) {
