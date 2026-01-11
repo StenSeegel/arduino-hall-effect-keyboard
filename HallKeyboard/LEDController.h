@@ -18,8 +18,8 @@ const int LED_BRIGHTNESS = 55;      // LED Helligkeit (0-255)
 Adafruit_NeoPixel pixels(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
 const uint32_t colorPalette[] = {
-  0x000000, 0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00,
-  0xFF00FF, 0x00FFFF, 0xFFFFFF, 0xFF8800, 0xFF0088,
+  0x000000, 0x00FF00, 0xFF0000, 0x0000FF, 0xFFFF00,
+  0x00FFFF, 0xFF00FF, 0xFFFFFF, 0x88FF00, 0x00FF88,
 };
 
 // Farben als RGB-Hex

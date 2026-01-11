@@ -40,6 +40,15 @@
 #define ARPEGGIATOR_SEQUENCE 4
 #endif
 
+// Arpeggiator Rate Konstanten
+#ifndef RATE_QUARTER
+#define RATE_WHOLE 0
+#define RATE_QUARTER 1
+#define RATE_EIGHTH 2
+#define RATE_TRIPLET 3
+#define RATE_SIXTEENTH 4
+#endif
+
 // ============================================
 // SOFTWARE CONTROLLER STATE
 // ============================================
@@ -57,6 +66,7 @@ bool arpeggiatorActive = false;
 // Submenu-Navigation
 bool inSubmenu = false;
 int currentSubmenu = 0;
+int currentSubmenuPage = 0;
 int submenuIndex = 0;
 int maxSubmenuIndex = 0;
 bool submenuChanged = false;
@@ -78,13 +88,22 @@ bool chordNotesActive[NUM_SWITCHES];
 // Arpeggiator Mode Variables
 extern int arpeggiatorMode;
 extern int arpeggiatorRate;
+extern int arpeggiatorDutyCycle;
 bool autoHoldActivatedByArp = false;
 int savedPlayModeTypeBeforeArp = 0;
 bool savedPlayModeActiveBeforeArp = false;
 
+// New: Reference counting for overlapping chords in Additive Hold
+uint8_t holdModeNoteRefCount[128];
+
 // Save/Restore Variables
 int savedArpeggiatorModeBeforeSubmenu = 0;
+int savedArpeggiatorRateBeforeSubmenu = 2; // Default RATE_EIGHTH
+int savedArpeggiatorDutyCycleBeforeSubmenu = 50;
 int savedOctaveBeforeSubmenu = 3;
+bool savedPlayModeActiveBeforeSubmenu = false;
+bool savedChordModeActiveBeforeSubmenu = false;
+bool savedArpeggiatorActiveBeforeSubmenu = false;
 
 // ============================================
 // EXTERN GLOBALS (from HallKeyboard.ino / other headers)
@@ -96,10 +115,15 @@ extern void setLED(int switchIndex, bool on, bool skipLEDs = false);
 extern void confirmLED(int switchIndex);
 extern void showOctaveLED(int octave);
 extern void disableControllerLEDsForNotes();
+extern bool switch_triggered[13];
+extern bool switch_released[13];
+extern bool switch_held[13];
 extern int getChordNote(int switchIndex, int variationType, int noteIndex);
 extern void removeNoteFromArpeggiatorMode(int note);
 extern void addNoteToArpeggiatorMode(int note);
+extern void clearArpeggiatorNotes();
 extern void transposeArpeggiatorNotes(int semiTones);
+extern uint8_t arpNoteRefCount[128];
 extern void clearChordMode();
 extern const int maxChordNotes;
 extern bool holdModeMidiNotes[128];
@@ -130,6 +154,9 @@ void initSoftwareController() {
     heldNotes[i] = false;
     chordNotesActive[i] = false;
   }
+  for (int i = 0; i < 128; i++) {
+    holdModeNoteRefCount[i] = 0;
+  }
 }
 
 void enterSubmenu(int submenuNumber);
@@ -147,9 +174,12 @@ void togglePlayModeOnOff() {
   if (!playModeActive) {
     // Wenn Play Mode aus, alle gehaltenen Noten sofort beenden
     for (int i = 0; i < 128; i++) {
+      holdModeNoteRefCount[i] = 0;
       if (holdModeMidiNotes[i]) {
         sendMidiNote(0x90, i, 0x00);
         holdModeMidiNotes[i] = false;
+        // BUG FIX: Wenn Hold deaktiviert wird, Noten auch aus Arp entfernen (falls sie nicht physikalisch gehalten werden)
+        removeNoteFromArpeggiatorMode(i); 
       }
     }
     
@@ -167,8 +197,8 @@ void togglePlayModeOnOff() {
     additiveMode = (playModeType == PLAY_MODE_ADDITIVE);
   }
   
-  Serial.print("Play Mode: ");
-  Serial.println(playModeActive ? "EIN" : "AUS");
+  //Serial.print("Play Mode: ");
+  //Serial.println(playModeActive ? "EIN" : "AUS");
   
 }
 
@@ -184,9 +214,12 @@ void toggleChordModeOnOff() {
     // Wenn Chord Mode aus, beende alle per Akkord gehaltenen Noten
     // Um sicher zu gehen, beenden wir alle gehaltenen Noten im Hold Mode
     for (int i = 0; i < 128; i++) {
+       holdModeNoteRefCount[i] = 0;
        if (holdModeMidiNotes[i]) {
          sendMidiNote(0x90, i, 0x00);
          holdModeMidiNotes[i] = false;
+         // Auch aus Arp entfernen
+         removeNoteFromArpeggiatorMode(i);
        }
     }
     
@@ -202,8 +235,8 @@ void toggleChordModeOnOff() {
     }
   }
   
-  Serial.print("Chord Mode: ");
-  Serial.println(chordModeActive ? "EIN" : "AUS");
+  //Serial.print("Chord Mode: ");
+  //Serial.println(chordModeActive ? "EIN" : "AUS");
   
 }
 
@@ -212,12 +245,14 @@ void toggleArpeggiatorOnOff() {
   arpeggiatorActive = !arpeggiatorActive;
   
   if (!arpeggiatorActive) {
+    // 1. Arpeggiator stoppen
     if (currentArpeggiatorPlayingNote >= 0 && currentArpeggiatorPlayingNote < 128) {
       sendMidiNote(0x80, currentArpeggiatorPlayingNote, 0);
       currentArpeggiatorPlayingNote = -1;
     }
     arpeggiatorNoteIsOn = false;
-    numHeldArpeggiatorNotes = 0;
+    // Wir löschen die Noten NICHT (clearArpeggiatorNotes() entfernt), für Persistenz
+    // Aber wir senden auch keine statischen Note-Ons mehr für Hold (Wunsch des Users)
 
     // Wenn Auto-Hold durch Arp aktiviert wurde, jetzt wieder ausschalten
     if (autoHoldActivatedByArp) {
@@ -242,10 +277,49 @@ void toggleArpeggiatorOnOff() {
           holdModeMidiNotes[i] = false;
         }
       }
-      Serial.println("Sequence Mode Auto-Hold deaktiviert - Reset auf Vorzustand");
+      //Serial.println("Sequence Mode Auto-Hold deaktiviert - Reset auf Vorzustand");
     }
   } else {
-    currentArpeggiatorIndex = 0;
+    // 1. Statische Hold-Noten stoppen, wenn sie gespielt werden
+    if (holdMode) {
+      for (int i = 0; i < 128; i++) {
+        if (holdModeMidiNotes[i]) {
+          sendMidiNote(0x90, i, 0x00);
+        }
+      }
+    }
+    
+    // 2. Bestehende gehaltene Noten in den Arpeggiator übertragen
+    // NUR hinzufügen wenn RefCount 0 (da wir clearArpeggiatorNotes() entfernt haben
+    // für die Persistenz beim Aus/Einschalten).
+    for (int i = 0; i < NUM_SWITCHES; i++) {
+        if (heldNotes[i] || switch_held[i]) {
+            // Berechne Noten (inkl. Chords)
+            int baseNote = midiNotes[i] + (currentOctave * 12);
+            if (chordModeActive && chordModeType != CHORD_MODE_OFF) {
+                bool isFolded = (chordModeType == CHORD_MODE_FOLDED);
+                for (int j = 0; j < maxChordNotes; j++) {
+                    int noteOffset = getChordNote(i, scaleType, j);
+                    if (noteOffset >= 0) {
+                        int chordNote = baseNote + noteOffset;
+                        if (isFolded) {
+                            while (chordNote > (currentOctave + 1) * 12) chordNote -= 12;
+                            while (chordNote < currentOctave * 12) chordNote += 12;
+                        }
+                        if (arpNoteRefCount[chordNote] == 0) {
+                            addNoteToArpeggiatorMode(chordNote);
+                        }
+                    }
+                }
+            } else {
+                if (arpNoteRefCount[baseNote] == 0) {
+                    addNoteToArpeggiatorMode(baseNote);
+                }
+            }
+        }
+    }
+
+    currentArpeggiatorIndex = -1; // -1 sorgt dafür, dass er beim nächsten Beat bei 0 startet
     
     // Sequence Mode Sonderfall: Aktiviere Hold (Additive) als Default
     if (arpeggiatorMode == ARPEGGIATOR_SEQUENCE) {
@@ -259,23 +333,46 @@ void toggleArpeggiatorOnOff() {
         holdMode = true;
         additiveMode = true;
         autoHoldActivatedByArp = true;
-        Serial.println("Sequence Mode Auto-Hold (Additive) aktiviert");
+        //Serial.println("Sequence Mode Auto-Hold (Additive) aktiviert");
       }
     }
   }
   
-  Serial.print("Arpeggiator Mode: ");
-  Serial.println(arpeggiatorActive ? "EIN" : "AUS");
+  //Serial.print("Arpeggiator Mode: ");
+  //Serial.println(arpeggiatorActive ? "EIN" : "AUS");
   
 }
+
+void enterSubmenuPage(int submenuNumber, int page);
 
 // Submenu betreten
 void enterSubmenu(int submenuNumber) {
   inSubmenu = true;
   currentSubmenu = submenuNumber;
-  submenuIndex = 0;
+  currentSubmenuPage = 0;
   submenuChanged = true;
   isIdle = true;
+  
+  // Merk dir den aktiven Status vor dem Öffnen
+  if (submenuNumber == 1) savedPlayModeActiveBeforeSubmenu = playModeActive;
+  if (submenuNumber == 2) savedChordModeActiveBeforeSubmenu = chordModeActive;
+  if (submenuNumber == 3) savedArpeggiatorActiveBeforeSubmenu = arpeggiatorActive;
+
+  // Modus automatisch aktivieren, falls nicht an
+  if (submenuNumber == 1 && !playModeActive) togglePlayModeOnOff();
+  if (submenuNumber == 2 && !chordModeActive) toggleChordModeOnOff();
+  if (submenuNumber == 3 && !arpeggiatorActive) toggleArpeggiatorOnOff();
+
+  enterSubmenuPage(submenuNumber, 0);
+  
+  //Serial.print("Submenu ");
+  //Serial.print(submenuNumber);
+  //Serial.println(" geöffnet");
+}
+
+void enterSubmenuPage(int submenuNumber, int page) {
+  submenuIndex = 0;
+  currentSubmenuPage = page;
   
   switch(submenuNumber) {
     case 1:
@@ -283,13 +380,42 @@ void enterSubmenu(int submenuNumber) {
       submenuIndex = playModeType;
       break;
     case 2:
-      maxSubmenuIndex = NUM_SCALE_TYPES;
-      submenuIndex = scaleType;
+      if (page == 0) {
+        maxSubmenuIndex = NUM_SCALE_TYPES;
+        submenuIndex = scaleType;
+      } else {
+        maxSubmenuIndex = 2; // Extended, Folded
+        submenuIndex = (chordModeType == CHORD_MODE_FOLDED) ? 1 : 0;
+      }
       break;
     case 3:
-      maxSubmenuIndex = NUM_ARPEGGIATOR_MODES;
-      submenuIndex = arpeggiatorMode;
-      savedArpeggiatorModeBeforeSubmenu = arpeggiatorMode;
+      if (page == 0) {
+        maxSubmenuIndex = NUM_ARPEGGIATOR_MODES;
+        submenuIndex = arpeggiatorMode;
+        savedArpeggiatorModeBeforeSubmenu = arpeggiatorMode;
+        savedArpeggiatorRateBeforeSubmenu = arpeggiatorRate;
+        savedArpeggiatorDutyCycleBeforeSubmenu = arpeggiatorDutyCycle;
+      } else if (page == 1) {
+        maxSubmenuIndex = 5; // WHOLE, QUARTER, EIGHTH, TRIPLET, SIXTEENTH
+        // Mapping: 0->WHOLE, 1->QUARTER, 2->EIGHTH, 3->TRIPLET, 4->SIXTEENTH
+        if (arpeggiatorRate == RATE_WHOLE) submenuIndex = 0;
+        else if (arpeggiatorRate == RATE_QUARTER) submenuIndex = 1;
+        else if (arpeggiatorRate == RATE_EIGHTH) submenuIndex = 2;
+        else if (arpeggiatorRate == RATE_TRIPLET) submenuIndex = 3;
+        else if (arpeggiatorRate == RATE_SIXTEENTH) submenuIndex = 4;
+      } else {
+        // Page 2: Duty Cycle
+        maxSubmenuIndex = 8;
+        int dC = arpeggiatorDutyCycle;
+        if (dC <= 10) submenuIndex = 0;
+        else if (dC <= 25) submenuIndex = 1;
+        else if (dC <= 40) submenuIndex = 2;
+        else if (dC <= 50) submenuIndex = 3;
+        else if (dC <= 60) submenuIndex = 4;
+        else if (dC <= 75) submenuIndex = 5;
+        else if (dC <= 90) submenuIndex = 6;
+        else submenuIndex = 7;
+      }
       break;
     case 4:
       maxSubmenuIndex = 8;
@@ -297,11 +423,7 @@ void enterSubmenu(int submenuNumber) {
       savedOctaveBeforeSubmenu = currentOctave;
       break;
   }
-  
-  Serial.print("Submenu ");
-  Serial.print(submenuNumber);
-  Serial.println(" geöffnet");
-  
+  submenuChanged = true;
 }
 
 // Submenu verlassen
@@ -319,52 +441,67 @@ void exitSubmenu(bool saveChanges) {
         }
         break;
       case 2:
-        if (submenuIndex != scaleType) {
-          scaleType = submenuIndex;
+        if (currentSubmenuPage == 0) {
+          if (submenuIndex != scaleType) {
+            scaleType = submenuIndex;
+          }
+        } else {
+          chordModeType = (submenuIndex == 1) ? CHORD_MODE_FOLDED : CHORD_MODE_EXTENDED;
         }
         break;
       case 3:
-        if (submenuIndex != arpeggiatorMode) {
-          int oldArpMode = arpeggiatorMode;
-          arpeggiatorMode = submenuIndex;
-          
-          // Sequence Mode Sonderfall: Aktiviere Hold (Additive) als Default
-          if (arpeggiatorActive && arpeggiatorMode == ARPEGGIATOR_SEQUENCE) {
-            if (!playModeActive && !chordModeActive) {
-              // Speichere Vorzustand
-              savedPlayModeActiveBeforeArp = playModeActive;
-              savedPlayModeTypeBeforeArp = playModeType;
+        if (currentSubmenuPage == 0) {
+          if (submenuIndex != arpeggiatorMode) {
+            int oldArpMode = arpeggiatorMode;
+            arpeggiatorMode = submenuIndex;
+            
+            // Sequence Mode Sonderfall: Aktiviere Hold (Additive) als Default
+            if (arpeggiatorActive && arpeggiatorMode == ARPEGGIATOR_SEQUENCE) {
+              if (!playModeActive && !chordModeActive) {
+                // Speichere Vorzustand
+                savedPlayModeActiveBeforeArp = playModeActive;
+                savedPlayModeTypeBeforeArp = playModeType;
 
-              playModeActive = true;
-              playModeType = PLAY_MODE_ADDITIVE;
-              holdMode = true;
-              additiveMode = true;
-              autoHoldActivatedByArp = true;
-              Serial.println("Sequence Mode Auto-Hold (Additive) aktiviert");
+                playModeActive = true;
+                playModeType = PLAY_MODE_ADDITIVE;
+                holdMode = true;
+                additiveMode = true;
+                autoHoldActivatedByArp = true;
+                //Serial.println("Sequence Mode Auto-Hold (Additive) aktiviert");
+              }
+            }
+            // Wenn wir von Sequence wegwechseln, Auto-Hold ggf. deaktivieren
+            else if (arpeggiatorActive && oldArpMode == ARPEGGIATOR_SEQUENCE && autoHoldActivatedByArp) {
+                playModeActive = savedPlayModeActiveBeforeArp;
+                playModeType = savedPlayModeTypeBeforeArp;
+                
+                // Berechne hold/additive states neu basierend auf dem alten Typ
+                holdMode = (playModeActive && (playModeType == PLAY_MODE_HOLD || playModeType == PLAY_MODE_ADDITIVE));
+                additiveMode = (playModeActive && playModeType == PLAY_MODE_ADDITIVE);
+                
+                autoHoldActivatedByArp = false;
+                
+                for (int i = 0; i < NUM_SWITCHES; i++) {
+                  heldNotes[i] = false;
+                }
+                for (int i = 0; i < 128; i++) {
+                  holdModeNoteRefCount[i] = 0;
+                  if (holdModeMidiNotes[i]) {
+                    sendMidiNote(0x90, i, 0x00);
+                    holdModeMidiNotes[i] = false;
+                  }
+                }
+                //Serial.println("Sequence Mode Auto-Hold zurückgesetzt auf Vorzustand");
             }
           }
-          // Wenn wir von Sequence wegwechseln, Auto-Hold ggf. deaktivieren
-          else if (arpeggiatorActive && oldArpMode == ARPEGGIATOR_SEQUENCE && autoHoldActivatedByArp) {
-              playModeActive = savedPlayModeActiveBeforeArp;
-              playModeType = savedPlayModeTypeBeforeArp;
-              
-              // Berechne hold/additive states neu basierend auf dem alten Typ
-              holdMode = (playModeActive && (playModeType == PLAY_MODE_HOLD || playModeType == PLAY_MODE_ADDITIVE));
-              additiveMode = (playModeActive && playModeType == PLAY_MODE_ADDITIVE);
-              
-              autoHoldActivatedByArp = false;
-              
-              for (int i = 0; i < NUM_SWITCHES; i++) {
-                heldNotes[i] = false;
-              }
-              for (int i = 0; i < 128; i++) {
-                if (holdModeMidiNotes[i]) {
-                  sendMidiNote(0x90, i, 0x00);
-                  holdModeMidiNotes[i] = false;
-                }
-              }
-              Serial.println("Sequence Mode Auto-Hold zurückgesetzt auf Vorzustand");
-          }
+        } else if (currentSubmenuPage == 1) {
+          // Rate Mapping
+          int rates[] = {RATE_WHOLE, RATE_QUARTER, RATE_EIGHTH, RATE_TRIPLET, RATE_SIXTEENTH};
+          arpeggiatorRate = rates[submenuIndex % 5];
+        } else if (currentSubmenuPage == 2) {
+          // Duty Cycle Mapping
+          int duties[] = {10, 25, 40, 50, 60, 75, 90, 99};
+          arpeggiatorDutyCycle = duties[submenuIndex % 8];
         }
         break;
       case 4:
@@ -372,10 +509,22 @@ void exitSubmenu(bool saveChanges) {
         break;
     }
   } else {
+    // Falls der Modus erst beim Öffnen des Submenüs aktiviert wurde, beim Abbrechen wieder deaktivieren
+    if (currentSubmenu == 1 && playModeActive != savedPlayModeActiveBeforeSubmenu) {
+      togglePlayModeOnOff();
+    }
+    if (currentSubmenu == 2 && chordModeActive != savedChordModeActiveBeforeSubmenu) {
+      toggleChordModeOnOff();
+    }
+    if (currentSubmenu == 3 && arpeggiatorActive != savedArpeggiatorActiveBeforeSubmenu) {
+      toggleArpeggiatorOnOff();
+    }
+
     switch(currentSubmenu) {
       case 3:
         arpeggiatorMode = savedArpeggiatorModeBeforeSubmenu;
-        
+        arpeggiatorRate = savedArpeggiatorRateBeforeSubmenu;
+        arpeggiatorDutyCycle = savedArpeggiatorDutyCycleBeforeSubmenu;
         break;
       case 4:
         transposeArpeggiatorNotes((savedOctaveBeforeSubmenu - currentOctave) * 12);
@@ -388,7 +537,7 @@ void exitSubmenu(bool saveChanges) {
   currentSubmenu = 0;
   submenuIndex = 0;
   submenuChanged = true;
-  Serial.println("Submenu verlassen");
+  //Serial.println("Submenu verlassen");
   
 }
 
@@ -406,6 +555,23 @@ void handleShortPress(int fsNumber) {
         if (submenuIndex > 0) {
           submenuIndex--;
           submenuChanged = true;
+          
+          // Real-time Preview Logik
+          if (currentSubmenu == 3) {
+            if (currentSubmenuPage == 0) {
+              arpeggiatorMode = submenuIndex;
+            } else if (currentSubmenuPage == 1) {
+              int rates[] = {RATE_WHOLE, RATE_QUARTER, RATE_EIGHTH, RATE_TRIPLET, RATE_SIXTEENTH};
+              if (submenuIndex >= 0 && submenuIndex < 5) {
+                arpeggiatorRate = rates[submenuIndex];
+              }
+            } else if (currentSubmenuPage == 2) {
+              int duties[] = {10, 25, 40, 50, 60, 75, 90, 99};
+              if (submenuIndex >= 0 && submenuIndex < 8) {
+                arpeggiatorDutyCycle = duties[submenuIndex];
+              }
+            }
+          }
           if (currentSubmenu == 4) {
             currentOctave = submenuIndex;
             transposeArpeggiatorNotes(-12);
@@ -416,6 +582,23 @@ void handleShortPress(int fsNumber) {
         if (submenuIndex < maxSubmenuIndex - 1) {
           submenuIndex++;
           submenuChanged = true;
+          
+          // Real-time Preview Logik
+          if (currentSubmenu == 3) {
+            if (currentSubmenuPage == 0) {
+              arpeggiatorMode = submenuIndex;
+            } else if (currentSubmenuPage == 1) {
+              int rates[] = {RATE_WHOLE, RATE_QUARTER, RATE_EIGHTH, RATE_TRIPLET, RATE_SIXTEENTH};
+              if (submenuIndex >= 0 && submenuIndex < 5) {
+                arpeggiatorRate = rates[submenuIndex];
+              }
+            } else if (currentSubmenuPage == 2) {
+              int duties[] = {10, 25, 40, 50, 60, 75, 90, 99};
+              if (submenuIndex >= 0 && submenuIndex < 8) {
+                arpeggiatorDutyCycle = duties[submenuIndex];
+              }
+            }
+          }
           if (currentSubmenu == 4) {
             currentOctave = submenuIndex;
             transposeArpeggiatorNotes(12);
@@ -429,8 +612,8 @@ void handleShortPress(int fsNumber) {
       case 2: toggleChordModeOnOff(); break;
       case 3: toggleArpeggiatorOnOff(); break;
       case 4:
-        Serial.print("Tap Tempo registriert - BPM: ");
-        Serial.println(tapTempo.getBPM());
+        //Serial.print("Tap Tempo registriert - BPM: ");
+        //Serial.println(tapTempo.getBPM());
         break;
     }
   }
@@ -446,11 +629,26 @@ void handleFunctionSwitches() {
       functionSwitchLongPressed[i] = false;
     }
     
-    if (functionSwitches[i].isDown() && !inSubmenu && !functionSwitchLongPressed[i]) {
+    if (functionSwitches[i].isDown() && !functionSwitchLongPressed[i]) {
       unsigned long currentPressTime = millis() - functionSwitchPressTime[i];
       if (currentPressTime >= LONG_PRESS_DURATION) {
         functionSwitchLongPressed[i] = true;
-        enterSubmenu(i + 1);
+        
+        if (inSubmenu) {
+          // Innerhalb eines Submenüs: FS4 (Index 3) blättert Seiten um
+          if (i == 3) {
+            int numPages = 1; // Default: 1 Seite (0)
+            if (currentSubmenu == 2) numPages = 2;
+            if (currentSubmenu == 3) numPages = 3;
+            
+            currentSubmenuPage = (currentSubmenuPage + 1) % numPages;
+            enterSubmenuPage(currentSubmenu, currentSubmenuPage);
+            //Serial.print("Submenu Page gewechselt zu: ");
+            //Serial.println(currentSubmenuPage);
+          }
+        } else {
+          enterSubmenu(i + 1);
+        }
       }
     }
     
@@ -554,9 +752,11 @@ void processNoteSwitches() {
           if (heldSwitchIdx != -1) {
             heldNotes[heldSwitchIdx] = false;
             for (int n = 0; n < 128; n++) {
+              holdModeNoteRefCount[n] = 0;
               if (holdModeMidiNotes[n]) {
-                sendMidiNote(0x90, n, 0x00);
+                if (!arpeggiatorActive) sendMidiNote(0x90, n, 0x00);
                 holdModeMidiNotes[n] = false;
+                removeNoteFromArpeggiatorMode(n);
               }
             }
           }
@@ -568,9 +768,11 @@ void processNoteSwitches() {
           heldSwitchIdx = -1;
           heldNotes[i] = false;
           for (int n = 0; n < 128; n++) {
+            holdModeNoteRefCount[n] = 0;
             if (holdModeMidiNotes[n]) {
-              sendMidiNote(0x90, n, 0x00);
+              if (!arpeggiatorActive) sendMidiNote(0x90, n, 0x00);
               holdModeMidiNotes[n] = false;
+              removeNoteFromArpeggiatorMode(n);
             }
           }
           isTriggeringNew = false;
@@ -582,29 +784,57 @@ void processNoteSwitches() {
       // Play notes
       for (int noteIdx = 0; noteIdx < numNotesToPlay; noteIdx++) {
         int noteToPlay = notesToPlay[noteIdx];
-        if (holdMode && arpeggiatorActive) {
-          if (isTriggeringNew) addNoteToArpeggiatorMode(noteToPlay);
-          else removeNoteFromArpeggiatorMode(noteToPlay);
-        } else if (holdMode) {
+        if (holdMode) {
           if (additiveMode) {
-            if (holdModeMidiNotes[noteToPlay]) {
-              holdModeMidiNotes[noteToPlay] = false;
-              sendMidiNote(0x90, noteToPlay, 0x00);
+            if (isTriggeringNew) {
+              // Additive Hold: Turning switch ON
+              if (!holdModeMidiNotes[noteToPlay]) {
+                holdModeMidiNotes[noteToPlay] = true;
+                if (!arpeggiatorActive) sendMidiNote(0x90, noteToPlay, 0x45);
+              }
+              if (holdModeNoteRefCount[noteToPlay] < 255) {
+                holdModeNoteRefCount[noteToPlay]++;
+              }
+              addNoteToArpeggiatorMode(noteToPlay);
             } else {
-              holdModeMidiNotes[noteToPlay] = true;
-              sendMidiNote(0x90, noteToPlay, 0x45);
+              // Additive Hold: Turning switch OFF
+              if (holdModeNoteRefCount[noteToPlay] > 0) {
+                holdModeNoteRefCount[noteToPlay]--;
+                if (holdModeNoteRefCount[noteToPlay] == 0) {
+                  holdModeMidiNotes[noteToPlay] = false;
+                  if (!arpeggiatorActive) sendMidiNote(0x90, noteToPlay, 0x00);
+                }
+              }
+              removeNoteFromArpeggiatorMode(noteToPlay);
             }
           } else {
             // Single Hold: Note aktivieren (Alte wurden oben bereits deaktiviert)
             if (isTriggeringNew) {
               holdModeMidiNotes[noteToPlay] = true;
-              sendMidiNote(0x90, noteToPlay, 0x45);
+              if (!arpeggiatorActive) sendMidiNote(0x90, noteToPlay, 0x45);
+              // RefCounts wurden oben beim loeschen der alten Noten bereits zurueckgesetzt
+              holdModeNoteRefCount[noteToPlay] = 1;
+              addNoteToArpeggiatorMode(noteToPlay);
+            } else {
+              // Single Hold Ausschalten (Gleiche Taste nochmal)
+              holdModeMidiNotes[noteToPlay] = false;
+              if (!arpeggiatorActive) sendMidiNote(0x90, noteToPlay, 0x00);
+              holdModeNoteRefCount[noteToPlay] = 0;
+              removeNoteFromArpeggiatorMode(noteToPlay);
             }
           }
-        } else if (arpeggiatorActive) {
-          addNoteToArpeggiatorMode(noteToPlay);
         } else {
-          sendMidiNote(0x90, noteToPlay, 0x45);
+          // Kein Hold Mode: Noten direkt an Arpeggiator geben
+          // Falls Arp aus ist, spielen wir die Note statisch
+          if (isTriggeringNew) {
+            addNoteToArpeggiatorMode(noteToPlay);
+            if (!arpeggiatorActive) sendMidiNote(0x90, noteToPlay, 0x45);
+          } else {
+            // Dieser Pfad wird bei momentary triggered normal nicht erreicht,
+            // aber zur Sicherheit fuer konsistente Logik:
+            removeNoteFromArpeggiatorMode(noteToPlay);
+            if (!arpeggiatorActive) sendMidiNote(0x90, noteToPlay, 0x00);
+          }
         }
       }
       
@@ -658,10 +888,12 @@ void processNoteSwitches() {
         
         for (int noteIdx = 0; noteIdx < numNotesToRelease; noteIdx++) {
           int noteToRelease = notesToRelease[noteIdx];
-          if (holdMode && arpeggiatorActive) { }
-          else if (holdMode) { }
-          else if (arpeggiatorActive) removeNoteFromArpeggiatorMode(noteToRelease);
-          else sendMidiNote(0x90, noteToRelease, 0x00);
+          // Wir entfernen die Note IMMER aus dem Arpeggiator (sofern kein Hold aktiv ist)
+          // Die Arp-Logik selbst enthaelt den RefCount
+          if (!holdMode) {
+            removeNoteFromArpeggiatorMode(noteToRelease);
+            if (!arpeggiatorActive) sendMidiNote(0x90, noteToRelease, 0x00);
+          }
         }
         
         if (chordModeActive && chordModeType != CHORD_MODE_OFF) {

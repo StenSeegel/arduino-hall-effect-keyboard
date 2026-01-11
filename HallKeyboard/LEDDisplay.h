@@ -29,8 +29,6 @@ extern int bpmPriorityBeats;
 extern int numHeldArpeggiatorNotes;
 extern int heldArpeggiatorNotes[13];
 
-bool switchHasActiveNote[13];
-
 // Track current display state to avoid redundant updates
 enum LEDDisplayState {
   DISPLAY_IDLE,
@@ -60,17 +58,26 @@ void updateLEDDisplay() {
     }
     
     // Farb-Mapping für Submenüs basierend auf Function Switch Farben
-    uint8_t bgColor = COLOR_BLUE_IDX; // Default
+    uint8_t bgColor = COLOR_RED_IDX; // Default (Play Mode/Hold)
     if (currentSubmenu == 2) bgColor = COLOR_YELLOW_IDX;
-    else if (currentSubmenu == 3) bgColor = COLOR_CYAN_IDX;
+    else if (currentSubmenu == 3) bgColor = COLOR_MAGENTA_IDX;
     else if (currentSubmenu == 4) bgColor = COLOR_WHITE_IDX;
+
+    // Unterseiten (Page 1, 2) haben unterschiedliche Helligkeiten und Auswahlfarben
+    uint8_t bgBrightness = 50;
+    if (currentSubmenuPage == 1) bgBrightness = 80;
+    else if (currentSubmenuPage == 2) bgBrightness = 110;
 
     // LED 0-7 zeigt submenuIndex an
     for (int i = 0; i < NUM_LEDS; i++) {
       if (i == submenuIndex) {
-        setLEDColor(i, COLOR_MAGENTA_IDX, 255); // Magenta für Auswahl
+        uint8_t selectColor = COLOR_MAGENTA_IDX; // Page 0
+        if (currentSubmenuPage == 1) selectColor = COLOR_WHITE_IDX;
+        else if (currentSubmenuPage == 2) selectColor = COLOR_YELLOW_IDX;
+        
+        setLEDColor(i, selectColor, 255); 
       } else if (i < maxSubmenuIndex) {
-        setLEDColor(i, bgColor, 50);           // Korrespondierende Farbe für verfügbare Optionen
+        setLEDColor(i, bgColor, bgBrightness);           // Korrespondierende Farbe für verfügbare Optionen
       } else {
         turnOffLED(i);
       }
@@ -117,67 +124,100 @@ void updateLEDDisplay() {
     }
     
     // Show active notes on LEDs 0-7
-    for (int i = 0; i < 13; i++) {
-      int ledIndex = ledMapping[i];
-      if (ledIndex < 0) continue;
-      
-      int midiNote = midiNotes[i] + (currentOctave * 12);
-      
-      // Check if this note is currently playing
-      bool isCurrentlyPlaying = activeMidiNotes[midiNote];
-      
-      // Check if this note is registered in Arpeggiator sequence
-      bool isArpRegistered = false;
-      if (arpeggiatorActive) {
-        for (int j = 0; j < numHeldArpeggiatorNotes; j++) {
-          if (heldArpeggiatorNotes[j] == midiNote) {
-            isArpRegistered = true;
-            break;
+    int keyboardMin = currentOctave * 12;
+    int keyboardMax = keyboardMin + 12;
+
+    for (int led = 0; led < NUM_LEDS; led++) {
+      bool noteInOctavePlaying = false;
+      bool noteInOctaveArp = false;
+      bool noteOutOctavePlaying = false;
+      bool noteOutOctaveArp = false;
+
+      // 1. Check current physical keyboard range (Notes 0-12 relative to current octave)
+      for (int i = 0; i < 13; i++) {
+        if (ledMapping[i] != led) continue;
+
+        int midiNoteOnKeyboard = midiNotes[i] + keyboardMin;
+
+        if (activeMidiNotes[midiNoteOnKeyboard]) noteInOctavePlaying = true;
+        if (arpeggiatorActive) {
+          for (int k = 0; k < numHeldArpeggiatorNotes; k++) {
+            if (heldArpeggiatorNotes[k] == midiNoteOnKeyboard) noteInOctaveArp = true;
           }
         }
       }
 
-      if (isCurrentlyPlaying || isArpRegistered) {
-        switchHasActiveNote[i] = true;
-        
+      // 2. Check ALL OTHER MIDI notes (Folded/Out-Of-Range logic)
+      // Only check if we don't already have an "In-Octave" note for this LED
+      // mapping out-of-range pitches to their closest pitch class equivalents on the keys.
+      if (!noteInOctavePlaying && !noteInOctaveArp) {
+        for (int note = 0; note < 128; note++) {
+          if (note >= keyboardMin && note <= keyboardMax) continue; // Skip physical range
+          
+          bool isNoteActive = activeMidiNotes[note];
+          bool isNoteInArp = false;
+          if (arpeggiatorActive) {
+            for (int k = 0; k < numHeldArpeggiatorNotes; k++) {
+              if (heldArpeggiatorNotes[k] == note) {
+                isNoteInArp = true;
+                break;
+              }
+            }
+          }
+
+          if (isNoteActive || isNoteInArp) {
+            // Does this out-of-range pitch share a pitch class with any key mapped to THIS led?
+            int pitchClass = note % 12;
+            for (int i = 0; i < 13; i++) {
+              if (ledMapping[i] == led && (midiNotes[i] % 12) == pitchClass) {
+                if (isNoteActive) noteOutOctavePlaying = true;
+                if (isNoteInArp) noteOutOctaveArp = true;
+              }
+            }
+          }
+        }
+      }
+
+      if (noteInOctavePlaying || noteInOctaveArp || noteOutOctavePlaying || noteOutOctaveArp) {
         // Determine note color based on current mode
         uint8_t colorIdx;
         uint8_t brightness = 255;
 
-        if (arpeggiatorActive) {
-          colorIdx = COLOR_CYAN_IDX;
-          if (isArpRegistered && !isCurrentlyPlaying) {
-            brightness = 40; // Schwach leuchten für registrierte Noten
+        // HIGH PRIORITY: In Octave matches
+        if (noteInOctavePlaying || noteInOctaveArp) {
+          if (arpeggiatorActive) {
+            colorIdx = COLOR_MAGENTA_IDX; // Arp = Magenta
+            if (noteInOctaveArp && !noteInOctavePlaying) {
+              brightness = 40; // Schwach leuchten für registrierte Noten
+            }
+          } else if (chordModeActive && chordModeType != 0) {
+            colorIdx = COLOR_YELLOW_IDX;
+          } else if (playModeActive) {
+            colorIdx = COLOR_RED_IDX;
+          } else {
+            colorIdx = COLOR_WHITE_IDX;
           }
-        } else if (chordModeActive && chordModeType != 0) {
-          colorIdx = COLOR_YELLOW_IDX;
-        } else if (playModeActive) {
-          colorIdx = COLOR_GREEN_IDX;
         } else {
-          colorIdx = COLOR_WHITE_IDX;
+          // LOW PRIORITY: Out of Octave matches
+          if (arpeggiatorActive && (noteOutOctavePlaying || noteOutOctaveArp)) {
+            colorIdx = COLOR_ORANGE_IDX; // Arp OOR = Orange
+            if (noteOutOctaveArp && !noteOutOctavePlaying) {
+              brightness = 40; // Dim for registered notes
+            } else {
+              brightness = 255; // Full brightness for playing notes (Blink effect)
+            }
+          } else if (chordModeActive) {
+            colorIdx = COLOR_ORANGE_IDX; // Chord OOR = Orange
+            brightness = 150;
+          } else {
+            colorIdx = COLOR_CYAN_IDX; // General OOR = Cyan
+            brightness = 150;
+          }
         }
         
-        setLEDColor(ledIndex, colorIdx, brightness);
+        setLEDColor(led, colorIdx, brightness);
       } else {
-        if (switchHasActiveNote[i]) {
-          switchHasActiveNote[i] = false;
-          // Nur ausschalten wenn kein anderer Switch auf dieses LED gemappt ist und dort eine Note spielt oder registriert ist
-          bool otherActive = false;
-          for (int j = 0; j < 13; j++) {
-            if (i != j && ledMapping[j] == ledIndex) {
-               int otherNote = midiNotes[j] + (currentOctave * 12);
-               if (activeMidiNotes[otherNote]) otherActive = true;
-               
-               // Arp check for other mapped keys
-               if (arpeggiatorActive) {
-                 for (int k = 0; k < numHeldArpeggiatorNotes; k++) {
-                   if (heldArpeggiatorNotes[k] == otherNote) otherActive = true;
-                 }
-               }
-            }
-          }
-          if (!otherActive) turnOffLED(ledIndex);
-        }
+        turnOffLED(led);
       }
     }
   }
@@ -193,16 +233,12 @@ void updateLEDDisplay() {
     if (currentDisplayState != DISPLAY_IDLE) {
       currentDisplayState = DISPLAY_IDLE;
       turnOffAllLEDs();
-      // Clear all note trackers
-      for (int i = 0; i < 13; i++) {
-        switchHasActiveNote[i] = false;
-      }
     }
     
     // Show Controller LEDs (0-2 for FS1-FS3)
     // LED 0 (FS1): Play Mode
     if (playModeActive) {
-      setLEDColor(0, COLOR_BLUE_IDX, 200);
+      setLEDColor(0, COLOR_RED_IDX, 200);
     } else {
       turnOffLED(0);
     }
@@ -223,7 +259,7 @@ void updateLEDDisplay() {
 
     // LED 5 (FS3): Arpeggiator Mode
     if (arpeggiatorActive) {
-      setLEDColor(5, COLOR_CYAN_IDX, 200);
+      setLEDColor(5, COLOR_MAGENTA_IDX, 200);
     } else {
       turnOffLED(5);
     }

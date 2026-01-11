@@ -55,7 +55,7 @@ extern Button switches[NUM_SWITCHES];
  * Initialisiere
  */
 void initLEDAnimator() {
-  Serial.println("LED Animator init");
+  //Serial.println("LED Animator init");
 }
 
 /**

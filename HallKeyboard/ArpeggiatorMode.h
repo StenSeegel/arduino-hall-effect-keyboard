@@ -36,9 +36,12 @@ int arpeggiatorDutyCycle = 50;
 int currentArpeggiatorPlayingNote = -1;
 bool arpeggiatorNoteIsOn = false;
 float lastArpeggiatorSyncProgress = 0;
+int arpeggiatorBeatCounter = 0;
+float lastArpeggiatorRawProgress = 0;
 
 int heldArpeggiatorNotes[13];
 int numHeldArpeggiatorNotes = 0;
+uint8_t arpNoteRefCount[128];
 int currentArpeggiatorIndex = 0;
 bool arpeggiatorAscending = true;
 
@@ -60,15 +63,6 @@ extern void sendMidiNote(int cmd, int pitch, int velocity);
 #define ARPEGGIATOR_SEQUENCE 4
 #endif
 
-#ifndef RATE_QUARTER
-#define RATE_WHOLE 0
-#define RATE_QUARTER 1
-#define RATE_EIGHTH 2
-#define RATE_SIXTEENTH 4
-#define RATE_TRIPLET 3
-#define RATE_DOTTED_EIGHTH 5
-#endif
-
 // ============================================
 // FORWARD DECLARATIONS
 // ============================================
@@ -84,6 +78,9 @@ void initArpeggiatorMode() {
   }
   for (int i = 0; i < 13; i++) {
     heldArpeggiatorNotes[i] = -1;
+  }
+  for (int i = 0; i < 128; i++) {
+    arpNoteRefCount[i] = 0;
   }
   numHeldArpeggiatorNotes = 0;
 }
@@ -115,7 +112,6 @@ void updateArpeggiatorMode() {
       case RATE_EIGHTH:       divisions = 2.0; break;
       case RATE_SIXTEENTH:    divisions = 4.0; break;
       case RATE_TRIPLET:      divisions = 3.0; break;
-      case RATE_DOTTED_EIGHTH: divisions = 1.0 / 0.75; break;
       default:                divisions = 2.0; break;
     }
   }
@@ -123,15 +119,26 @@ void updateArpeggiatorMode() {
   arpeggiatorStepDuration = beatLength / divisions;
   
   unsigned long currentTime = millis();
-  float currentProgress = tapTempo.beatProgress();
-  float scaledProgress = fmod(currentProgress * divisions, divisions);
+  float currentRawProgress = tapTempo.beatProgress();
+  
+  // Update beat counter based on wrap-around of raw progress
+  if (currentRawProgress < lastArpeggiatorRawProgress) {
+    arpeggiatorBeatCounter = (arpeggiatorBeatCounter + 1) % 4; // Cycle through 4 beats
+  }
+  lastArpeggiatorRawProgress = currentRawProgress;
+
+  // Calculate continuous progress across 4 beats (0.0 to 4.0)
+  float continuousProgress = (float)arpeggiatorBeatCounter + currentRawProgress;
+  
+  // Scaled progress determines the trigger points
+  float scaledProgress = continuousProgress * divisions;
   
   // Trigger Logic: Prüfe ob Master-Phase eine Schwelle überschritten hat (Phasen-Lock zum Tap Tempo)
   bool trigger = false;
   if (floor(scaledProgress) != floor(lastArpeggiatorSyncProgress)) {
     trigger = true;
   } 
-  // Spezialfall Wrap-around
+  // Spezialfall Wrap-around der skalierten Phase (z.B. alle 4 Beats bei Whole Note)
   else if (scaledProgress < lastArpeggiatorSyncProgress) {
     trigger = true;
   }
@@ -142,8 +149,7 @@ void updateArpeggiatorMode() {
     arpeggiatorNoteOnTime = currentTime;
   }
 
-  // Immer den Sync-Status aktualisieren, auch wenn keine Noten gespielt werden, 
-  // um Phasen-Sprünge beim Starten zu vermeiden.
+  // Immer den Sync-Status aktualisieren
   lastArpeggiatorSyncProgress = scaledProgress;
 
   // Duty Cycle: Prüfe ob Note OFF sein sollte
@@ -193,8 +199,14 @@ void playNextArpeggiatorNote() {
   int nextIndex = 0;
   
   if (currentArpeggiatorIndex == -1) {
-    // Erste Note nach Ruhepause
-    nextIndex = 0;
+    // Erste Note nach Ruhepause: Bestimme Start-Index und Richtung basierend auf Modus
+    if (arpeggiatorMode == ARPEGGIATOR_DOWN || arpeggiatorMode == ARPEGGIATOR_DOWN_UP) {
+      nextIndex = count - 1;
+      arpeggiatorAscending = false;
+    } else {
+      nextIndex = 0;
+      arpeggiatorAscending = true;
+    }
   } else if (count == 1) {
     // Single Note Special: Bleibe immer bei Index 0 und pulse die Note
     nextIndex = 0;
@@ -279,15 +291,17 @@ void playNextArpeggiatorNote() {
  * Füge eine Note zur Arpeggiator-Sequenz hinzu
  */
 void addNoteToArpeggiatorMode(int note) {
-  if (!arpeggiatorActive) return;
-  if (numHeldArpeggiatorNotes >= 13) return;
+  if (note < 0 || note >= 128) return;
   
-  // Prüfe ob Note bereits in Liste
-  for (int i = 0; i < numHeldArpeggiatorNotes; i++) {
-    if (heldArpeggiatorNotes[i] == note) {
-      return;
-    }
+  // Increment Reference Count
+  arpNoteRefCount[note]++;
+  
+  // Check if note is already in the list
+  if (arpNoteRefCount[note] > 1) {
+    return; // Already present
   }
+  
+  if (numHeldArpeggiatorNotes >= 13) return;
   
   // Wenn das die erste Note ist, setzen wir den Index so zurück,
   // dass beim nächsten Beat-Trigger die erste Note (Index 0) spielt.
@@ -316,7 +330,16 @@ void transposeArpeggiatorNotes(int semiTones) {
  * Entferne eine Note aus der Arpeggiator-Sequenz
  */
 void removeNoteFromArpeggiatorMode(int note) {
-  if (!arpeggiatorActive) return;
+  if (note < 0 || note >= 128) return;
+  
+  if (arpNoteRefCount[note] > 0) {
+    arpNoteRefCount[note]--;
+  }
+  
+  // Nur entfernen wenn RefCount 0
+  if (arpNoteRefCount[note] > 0) {
+    return;
+  }
   
   for (int i = 0; i < numHeldArpeggiatorNotes; i++) {
     if (heldArpeggiatorNotes[i] == note) {
@@ -351,13 +374,14 @@ void removeNoteFromArpeggiatorMode(int note) {
 /**
  * Clear all arpeggiator notes
  */
-// void clearArpeggiatorMode() {
-//   for (int i = 0; i < 128; i++) {
-//     arpeggiatorMidiNotes[i] = false;
-//   }
-//   numHeldArpeggiatorNotes = 0;
-//   currentArpeggiatorPlayingNote = -1;
-//   arpeggiatorNoteIsOn = false;
-// }
+void clearArpeggiatorNotes() {
+  for (int i = 0; i < 128; i++) {
+    arpeggiatorMidiNotes[i] = false;
+    arpNoteRefCount[i] = 0;
+  }
+  numHeldArpeggiatorNotes = 0;
+  currentArpeggiatorPlayingNote = -1;
+  arpeggiatorNoteIsOn = false;
+}
 
 #endif
