@@ -38,6 +38,7 @@ bool arpeggiatorNoteIsOn = false;
 float lastArpeggiatorSyncProgress = 0;
 int arpeggiatorBeatCounter = 0;
 float lastArpeggiatorRawProgress = 0;
+int lastArpeggiatorSyncPulse = -1; // Neu: Für präzisen MIDI Clock Sync
 
 int heldArpeggiatorNotes[13];
 int numHeldArpeggiatorNotes = 0;
@@ -53,6 +54,10 @@ ArduinoTapTempo tapTempo;
 // ============================================
 extern bool arpeggiatorActive;
 extern void sendMidiNote(int cmd, int pitch, int velocity);
+
+// MIDI Clock Sync
+extern uint16_t masterPulseCounter;
+extern bool midiClockRunning;
 
 // Konstanten
 #ifndef ARPEGGIATOR_UP_DOWN
@@ -83,6 +88,21 @@ void initArpeggiatorMode() {
     arpNoteRefCount[i] = 0;
   }
   numHeldArpeggiatorNotes = 0;
+  currentArpeggiatorIndex = 0;
+  arpeggiatorAscending = true;
+}
+
+/**
+ * Setzt die interne Phase des Arpeggiators zurück.
+ * Nützlich um beim Start mit externer Clock oder MIDI Start synchron zu sein.
+ */
+void resetArpeggiatorPhase() {
+  lastArpeggiatorSyncProgress = -1.0; // Force immediate trigger on next update
+  arpeggiatorBeatCounter = 0;
+  lastArpeggiatorRawProgress = 0;
+  lastArpeggiatorSyncPulse = -1;  // Reset MIDI Pulse Sync
+  currentArpeggiatorIndex = -1; // So the first note played will be index 0
+  arpeggiatorAscending = true;
 }
 
 /**
@@ -135,12 +155,28 @@ void updateArpeggiatorMode() {
   
   // Trigger Logic: Prüfe ob Master-Phase eine Schwelle überschritten hat (Phasen-Lock zum Tap Tempo)
   bool trigger = false;
-  if (floor(scaledProgress) != floor(lastArpeggiatorSyncProgress)) {
-    trigger = true;
-  } 
-  // Spezialfall Wrap-around der skalierten Phase (z.B. alle 4 Beats bei Whole Note)
-  else if (scaledProgress < lastArpeggiatorSyncProgress) {
-    trigger = true;
+
+  if (midiClockRunning) {
+    // Hochpräziser Sync zur internen MIDI Clock
+    int pulsesPerStep = (int)(24.0 / divisions);
+    if (pulsesPerStep < 1) pulsesPerStep = 1;
+
+    // Trigger wenn ein neuer Pulse die Schwelle überschreitet
+    if (masterPulseCounter != lastArpeggiatorSyncPulse && (masterPulseCounter % pulsesPerStep == 0)) {
+      trigger = true;
+    }
+    lastArpeggiatorSyncPulse = masterPulseCounter;
+    
+    // Wir aktualisieren trotzdem scaledProgress für Legato/Duty-Cycle Logik unten
+  } else {
+    // Normaler Fall: Phase-Lock zum Tap Tempo
+    if (floor(scaledProgress) != floor(lastArpeggiatorSyncProgress)) {
+      trigger = true;
+    } 
+    // Spezialfall Wrap-around der skalierten Phase
+    else if (scaledProgress < lastArpeggiatorSyncProgress) {
+      trigger = true;
+    }
   }
 
   // Nur spielen, wenn auch Noten da sind

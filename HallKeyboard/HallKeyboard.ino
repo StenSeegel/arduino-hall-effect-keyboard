@@ -13,6 +13,11 @@
 #include "HardwareController.h"
 
 // ============================================
+// INCLUDE MIDI CLOCK GENERATOR LAYER
+// ============================================
+#include "MidiClockGenerator.h"
+
+// ============================================
 // INCLUDE SOFTWARE CONTROLLER LAYER
 // ============================================
 #include "SoftwareController.h"
@@ -89,6 +94,11 @@ void setup() {
   tapTempo.setBeatsUntilChainReset(4);
   tapTempo.setMinTaps(3); // Erfordert mindestens 3 Taps (2 Intervalle) um das Tempo zu ändern
   
+  // MIDI Clock initialisieren
+  initMidiClockGenerator();
+  updateClockInterval(); // Berechnet Intervall für 120 BPM
+  startMidiClock();       // Startet den Output
+  
   Serial.println("System Initialized");
 }
 
@@ -113,6 +123,7 @@ void loop() {
   if (!inSubmenu) {
     if (functionSwitches[3].trigger()) {
       bpmPriorityBeats = 8;
+      syncMidiClockToBPM(); // MIDI Clock neu ausrichten und Intervall updaten
     }
     tapTempo.update(functionSwitches[3].isDown());
   } else {
@@ -120,11 +131,22 @@ void loop() {
     tapTempo.update(false);
   }
   
+  // BPM Change Detection für MIDI Clock
+  static float lastBpmForClock = 0;
+  float currentBpm = tapTempo.getBPM();
+  if (abs(currentBpm - lastBpmForClock) > 0.1) {
+    updateClockInterval();
+    lastBpmForClock = currentBpm;
+  }
+  
   // Update Arpeggiator Playback (von ArpeggiatorMode.h)
   updateArpeggiatorMode();
   
   // Update MIDI Generator - Koordiniere alle aktiven Modi (von MidiGenerator.h)
   updateMidiGenerator();
+  
+  // Update MIDI Clock Generator (24 PPQN Output)
+  updateMidiClockGenerator();
   
   // ============================================
   // UPDATE LED LAYERS

@@ -93,6 +93,9 @@ bool autoHoldActivatedByArp = false;
 int savedPlayModeTypeBeforeArp = 0;
 bool savedPlayModeActiveBeforeArp = false;
 
+// Forward Declarations für Arpeggiator Synchronisation
+extern void resetArpeggiatorPhase();
+
 // New: Reference counting for overlapping chords in Additive Hold
 uint8_t holdModeNoteRefCount[128];
 
@@ -245,6 +248,11 @@ void toggleArpeggiatorOnOff() {
   arpeggiatorActive = !arpeggiatorActive;
   
   if (!arpeggiatorActive) {
+    // MIDI Clock Synchronisation: STOP (wenn konfiguriert)
+    if (stopClockOnArpDeactivate) {
+      stopMidiClock();
+    }
+
     // 1. Arpeggiator stoppen
     if (currentArpeggiatorPlayingNote >= 0 && currentArpeggiatorPlayingNote < 128) {
       sendMidiNote(0x80, currentArpeggiatorPlayingNote, 0);
@@ -280,6 +288,13 @@ void toggleArpeggiatorOnOff() {
       //Serial.println("Sequence Mode Auto-Hold deaktiviert - Reset auf Vorzustand");
     }
   } else {
+    // MIDI Clock Synchronisation: START
+    startMidiClock();
+    
+    // Arpeggiator Phase Reset für Synchronisation
+    tapTempo.resetTapChain(); // Setzt Master-Beat auf "jetzt"
+    resetArpeggiatorPhase();  // Setzt Arp-Trigger-Logik zurück
+
     // 1. Statische Hold-Noten stoppen, wenn sie gespielt werden
     if (holdMode) {
       for (int i = 0; i < 128; i++) {
