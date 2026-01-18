@@ -13,6 +13,11 @@
 #include "HardwareController.h"
 
 // ============================================
+// INCLUDE MIDI CLOCK RECEIVER LAYER
+// ============================================
+#include "MidiClockReceiver.h"
+
+// ============================================
 // INCLUDE MIDI CLOCK GENERATOR LAYER
 // ============================================
 #include "MidiClockGenerator.h"
@@ -95,6 +100,7 @@ void setup() {
   tapTempo.setMinTaps(3); // Erfordert mindestens 3 Taps (2 Intervalle) um das Tempo zu ändern
   
   // MIDI Clock initialisieren
+  initMidiClockReceiver(); // MIDI Clock Input Layer
   initMidiClockGenerator();
   updateClockInterval(); // Berechnet Intervall für 120 BPM
   startMidiClock();       // Startet den Output
@@ -103,6 +109,11 @@ void setup() {
 }
 
 void loop() {
+  // ============================================
+  // MIDI CLOCK RECEIVER: Poll MIDI Input
+  // ============================================
+  updateMidiClockReceiver(); // Liest Serial1 und prüft Timeout
+  
   // ============================================
   // HARDWARE CONTROLLER LAYER: Lese Input
   // ============================================
@@ -120,20 +131,22 @@ void loop() {
   
   // Update Tap Tempo (registriert die Tempo-Taps von FS4)
   // Tempo-Taps nur im Hauptmenü (nicht im Submenü) zulassen!
-  if (!inSubmenu) {
+  // MIDI Clock hat Vorrang - TapTempo nur aktiv wenn kein externes Clock
+  if (!inSubmenu && !midiClockActive) {
     if (functionSwitches[3].trigger()) {
       bpmPriorityBeats = 8;
       syncMidiClockToBPM(); // MIDI Clock neu ausrichten und Intervall updaten
     }
     tapTempo.update(functionSwitches[3].isDown());
   } else {
-    // Im Submenü: Clock weiterlaufen lassen, aber Button-Input ignorieren (false senden)
+    // Im Submenü oder bei MIDI Clock: Button-Input ignorieren (false senden)
     tapTempo.update(false);
   }
   
   // BPM Change Detection für MIDI Clock
+  // Prüfe sowohl TapTempo als auch MIDI Clock Input
   static float lastBpmForClock = 0;
-  float currentBpm = tapTempo.getBPM();
+  float currentBpm = midiClockActive ? (float)calculatedBPM : tapTempo.getBPM();
   if (abs(currentBpm - lastBpmForClock) > 0.1) {
     updateClockInterval();
     lastBpmForClock = currentBpm;

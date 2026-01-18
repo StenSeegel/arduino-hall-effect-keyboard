@@ -10,6 +10,7 @@
 #include "ArduinoTapTempo.h"
 
 extern Adafruit_NeoPixel pixels;
+extern bool midiClockActive; // From MidiClockReceiver
 
 // ============================================
 // LED ANIMATOR STATE
@@ -84,6 +85,7 @@ void updateErrorLED() {
 
 /**
  * Update LED 8 Blinklogik für Tap Tempo (nur wenn Arpeggiator aktiv)
+ * Zeigt auch MIDI Clock Sync Status an
  */
 void updateTapTempoLED() {
   if (inSubmenu) {
@@ -127,8 +129,11 @@ void updateTapTempoLED() {
     tapTempoLEDState = false;
   }
   
+  // Farbwahl: MIDI Clock = Cyan, TapTempo = White
+  uint8_t colorIdx = midiClockActive ? COLOR_CYAN_IDX : COLOR_WHITE_IDX;
+  
   if (tapTempoLEDState) {
-    setLEDColor(7, COLOR_WHITE_IDX, 255);
+    setLEDColor(7, colorIdx, 255);
   } else {
     turnOffLED(7);
   }

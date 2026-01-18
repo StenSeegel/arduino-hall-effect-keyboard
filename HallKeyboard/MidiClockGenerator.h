@@ -35,6 +35,10 @@ bool stopClockOnArpDeactivate = true; // Ob MIDI STOP gesendet werden soll, wenn
 // ============================================
 extern ArduinoTapTempo tapTempo;
 
+// Extern from MidiClockReceiver
+extern bool midiClockActive;
+extern uint16_t calculatedBPM;
+
 // ============================================
 // MIDI CLOCK CONSTANTS
 // ============================================
@@ -60,11 +64,24 @@ void initMidiClockGenerator() {
 /**
  * Berechne Clock-Intervall basierend auf aktuellem BPM
  * Formel: Mikrosekunden pro Viertelnote / 24 Pulses
+ * Priorisiert MIDI Clock Input über TapTempo
  */
 void updateClockInterval() {
-  float bpm = tapTempo.getBPM();
+  float bpm;
+  
+  // Wähle BPM Quelle: MIDI Clock hat Vorrang
+  if (midiClockActive) {
+    bpm = calculatedBPM; // Von MIDI Clock Receiver
+    // Serial.print("MIDI Clock BPM: ");
+  } else {
+    bpm = tapTempo.getBPM(); // Von internem TapTempo
+    // Serial.print("TapTempo BPM: ");
+  }
+  
   if (bpm <= 0) bpm = 120.0; // Sicherheitsnetz
   clockIntervalMicros = (60000000.0 / bpm) / PPQN_VALUE;
+  
+  // Serial.println(bpm);
 }
 
 /**
