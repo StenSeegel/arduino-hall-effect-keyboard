@@ -444,6 +444,9 @@ void removeNoteFromArpeggiatorMode(int note) {
  * Clear all arpeggiator notes
  */
 void clearArpeggiatorNotes() {
+  if (arpeggiatorNoteIsOn && currentArpeggiatorPlayingNote >= 0) {
+    sendMidiNote(0x80, currentArpeggiatorPlayingNote, 0);
+  }
   for (int i = 0; i < 128; i++) {
     arpeggiatorMidiNotes[i] = false;
     arpNoteRefCount[i] = 0;

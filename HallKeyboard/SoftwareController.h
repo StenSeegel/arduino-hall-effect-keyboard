@@ -177,6 +177,17 @@ void toggleArpeggiatorOnOff();
 
 // Toggle Play Mode Ein/Aus
 void togglePlayModeOnOff() {
+  if (arpeggiatorActive) {
+    // Im Arp Modus: IMMER aktiv, Toggled zwischen hold / latch und hold additive!
+    playModeType = (playModeType == PLAY_MODE_HOLD) ? PLAY_MODE_ADDITIVE : PLAY_MODE_HOLD;
+    playModeActive = true;
+    holdMode = true;
+    additiveMode = (playModeType == PLAY_MODE_ADDITIVE);
+    
+    autoHoldActivatedByArp = false; // Manuelle Änderung überschreibt Automatik
+    return;
+  }
+
   playModeActive = !playModeActive;
   autoHoldActivatedByArp = false; // Manuelle Änderung überschreibt Automatik
   
@@ -257,6 +268,9 @@ void toggleArpeggiatorOnOff() {
     // Neu: Warte auf den nächsten Downbeat (1)
     arpWaitingForSync = true;
     
+    // Bestehende Arp-Noten sicherheitshalber löschen (Neustart von Clean Slate)
+    clearArpeggiatorNotes();
+    
     // Nur MIDI START/Phase Reset senden, wenn wir MASTER sind (keine externe Clock)
     if (!midiClockActive) {
       startMidiClock();
@@ -273,9 +287,7 @@ void toggleArpeggiatorOnOff() {
       }
     }
     
-    // 2. Bestehende gehaltene Noten in den Arpeggiator übertragen
-    // NUR hinzufügen wenn RefCount 0 (da wir clearArpeggiatorNotes() entfernt haben
-    // für die Persistenz beim Aus/Einschalten).
+    // 2. Bestehende gehaltene Noten (aus manuellem Hold) in den Arpeggiator übertragen
     for (int i = 0; i < NUM_SWITCHES; i++) {
         if (heldNotes[i] || switch_held[i]) {
             // Berechne Noten (inkl. Chords)
@@ -290,35 +302,32 @@ void toggleArpeggiatorOnOff() {
                             while (chordNote > (currentOctave + 1) * 12) chordNote -= 12;
                             while (chordNote < currentOctave * 12) chordNote += 12;
                         }
-                        if (arpNoteRefCount[chordNote] == 0) {
-                            addNoteToArpeggiatorMode(chordNote);
-                        }
+                        addNoteToArpeggiatorMode(chordNote);
                     }
                 }
             } else {
-                if (arpNoteRefCount[baseNote] == 0) {
-                    addNoteToArpeggiatorMode(baseNote);
-                }
+                addNoteToArpeggiatorMode(baseNote);
             }
         }
     }
 
     currentArpeggiatorIndex = -1; // -1 sorgt dafür, dass er beim nächsten Beat bei 0 startet
     
-    // Sequence Mode Sonderfall: Aktiviere Hold (Additive) als Default
-    if (arpeggiatorMode == ARPEGGIATOR_SEQUENCE) {
-      if (!playModeActive && !chordModeActive) {
-        // Speichere Vorzustand
-        savedPlayModeActiveBeforeArp = playModeActive;
-        savedPlayModeTypeBeforeArp = playModeType;
-        
-        playModeActive = true;
+    // ARP Modus: Hold immer aktivieren (Default Latch / Play Mode 0)
+    if (!playModeActive) {
+      // Speichere Vorzustand
+      savedPlayModeActiveBeforeArp = playModeActive;
+      savedPlayModeTypeBeforeArp = playModeType;
+      
+      playModeActive = true;
+      // Bei Sequence Mode erzwingen wir Additive, sonst Latch (Hold)
+      if (arpeggiatorMode == ARPEGGIATOR_SEQUENCE) {
         playModeType = PLAY_MODE_ADDITIVE;
-        holdMode = true;
-        additiveMode = true;
-        autoHoldActivatedByArp = true;
-        //Serial.println("Sequence Mode Auto-Hold (Additive) aktiviert");
       }
+      
+      holdMode = true;
+      additiveMode = (playModeType == PLAY_MODE_ADDITIVE);
+      autoHoldActivatedByArp = true;
     }
   } else {
     // Arpeggiator ausschalten
@@ -328,13 +337,9 @@ void toggleArpeggiatorOnOff() {
       stopMidiClock();
     }
 
-    // 1. Arpeggiator stoppen
-    if (currentArpeggiatorPlayingNote >= 0 && currentArpeggiatorPlayingNote < 128) {
-      sendMidiNote(0x80, currentArpeggiatorPlayingNote, 0);
-      currentArpeggiatorPlayingNote = -1;
-    }
-    arpeggiatorNoteIsOn = false;
-
+    // 1. Arpeggiator stoppen und Speicher leeren
+    clearArpeggiatorNotes();
+    
     // Wenn Auto-Hold durch Arp aktiviert wurde, jetzt wieder ausschalten
     if (autoHoldActivatedByArp) {
       playModeActive = savedPlayModeActiveBeforeArp;
@@ -351,8 +356,9 @@ void toggleArpeggiatorOnOff() {
         heldNotes[i] = false;
         setLED(i, false);
       }
-      // Auch alle gehaltenen Noten stoppen
+      // Auch alle gehaltenen Noten stoppen und RefCounts zurücksetzen
       for (int i = 0; i < 128; i++) {
+        holdModeNoteRefCount[i] = 0;
         if (holdModeMidiNotes[i]) {
           sendMidiNote(0x90, i, 0x00);
           holdModeMidiNotes[i] = false;
@@ -474,43 +480,11 @@ void exitSubmenu(bool saveChanges) {
             int oldArpMode = arpeggiatorMode;
             arpeggiatorMode = submenuIndex;
             
-            // Sequence Mode Sonderfall: Aktiviere Hold (Additive) als Default
+            // Sequence Mode Sonderfall: Aktiviere Additive (Hold ist eh an)
             if (arpeggiatorActive && arpeggiatorMode == ARPEGGIATOR_SEQUENCE) {
-              if (!playModeActive && !chordModeActive) {
-                // Speichere Vorzustand
-                savedPlayModeActiveBeforeArp = playModeActive;
-                savedPlayModeTypeBeforeArp = playModeType;
-
-                playModeActive = true;
                 playModeType = PLAY_MODE_ADDITIVE;
                 holdMode = true;
                 additiveMode = true;
-                autoHoldActivatedByArp = true;
-                //Serial.println("Sequence Mode Auto-Hold (Additive) aktiviert");
-              }
-            }
-            // Wenn wir von Sequence wegwechseln, Auto-Hold ggf. deaktivieren
-            else if (arpeggiatorActive && oldArpMode == ARPEGGIATOR_SEQUENCE && autoHoldActivatedByArp) {
-                playModeActive = savedPlayModeActiveBeforeArp;
-                playModeType = savedPlayModeTypeBeforeArp;
-                
-                // Berechne hold/additive states neu basierend auf dem alten Typ
-                holdMode = (playModeActive && (playModeType == PLAY_MODE_HOLD || playModeType == PLAY_MODE_ADDITIVE));
-                additiveMode = (playModeActive && playModeType == PLAY_MODE_ADDITIVE);
-                
-                autoHoldActivatedByArp = false;
-                
-                for (int i = 0; i < NUM_SWITCHES; i++) {
-                  heldNotes[i] = false;
-                }
-                for (int i = 0; i < 128; i++) {
-                  holdModeNoteRefCount[i] = 0;
-                  if (holdModeMidiNotes[i]) {
-                    sendMidiNote(0x90, i, 0x00);
-                    holdModeMidiNotes[i] = false;
-                  }
-                }
-                //Serial.println("Sequence Mode Auto-Hold zurückgesetzt auf Vorzustand");
             }
           }
         } else if (currentSubmenuPage == 1) {
@@ -691,7 +665,27 @@ void handleFunctionSwitches() {
             //Serial.println(currentSubmenuPage);
           }
         } else {
-          enterSubmenu(i + 1);
+          // SPECIAL: Long Press on Hold (FS1) in ARP Mode clears ARP memory
+          if (i == 0 && arpeggiatorActive) {
+            clearArpeggiatorNotes();
+            
+            // Auch Hold-Noten im Speicher löschen (damit der Arp wirklich leer ist)
+            for (int n = 0; n < 128; n++) {
+              holdModeNoteRefCount[n] = 0;
+              if (holdModeMidiNotes[n]) {
+                holdModeMidiNotes[n] = false;
+              }
+            }
+            for (int s = 0; s < NUM_SWITCHES; s++) {
+               heldNotes[s] = false;
+            }
+            heldNote = -1;
+            heldSwitchIdx = -1;
+
+            confirmLED(0); // Visuelles Feedback
+          } else {
+            enterSubmenu(i + 1);
+          }
         }
       }
     }
