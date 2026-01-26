@@ -39,6 +39,7 @@ float lastArpeggiatorSyncProgress = 0;
 int arpeggiatorBeatCounter = 0;
 float lastArpeggiatorRawProgress = 0;
 int lastArpeggiatorSyncPulse = -1; // Neu: Für präzisen MIDI Clock Sync
+bool arpWaitingForSync = false;    // Ob der ARP auf den nächsten Downbeat wartet
 
 int heldArpeggiatorNotes[13];
 int numHeldArpeggiatorNotes = 0;
@@ -116,6 +117,24 @@ void updateArpeggiatorMode() {
   if (!arpeggiatorActive) {
     return;
   }
+
+  // Wartet der ARP auf den Downbeat (die "1")?
+  if (arpWaitingForSync) {
+    if (midiClockRunning || midiClockActive) {
+      // Warte auf den ersten Puls des 4-Beat Taktes (masterPulseCounter 0-95)
+      if (masterPulseCounter == 0) {
+        arpWaitingForSync = false;
+        resetArpeggiatorPhase();
+      } else {
+        // Noch nicht auf der 1, abbrechen
+        return;
+      }
+    } else {
+      // Keine Clock aktiv, sofort starten
+      arpWaitingForSync = false;
+      resetArpeggiatorPhase();
+    }
+  }
   
   // Berechne StepDuration basierend auf Rate und Tap Tempo
   unsigned long beatLength = tapTempo.getBeatLength();
@@ -142,13 +161,26 @@ void updateArpeggiatorMode() {
   float currentRawProgress = tapTempo.beatProgress();
   
   // Update beat counter based on wrap-around of raw progress
-  if (currentRawProgress < lastArpeggiatorRawProgress) {
-    arpeggiatorBeatCounter = (arpeggiatorBeatCounter + 1) % 4; // Cycle through 4 beats
+  // Aber NUR wenn keine Clock läuft - bei Clock nutzen wir masterPulseCounter
+  if (!(midiClockRunning || midiClockActive)) {
+    if (currentRawProgress < lastArpeggiatorRawProgress) {
+      arpeggiatorBeatCounter = (arpeggiatorBeatCounter + 1) % 4; // Cycle through 4 beats
+    }
+  } else {
+    // Bei MIDI Clock: Berechne den Beat direkt aus dem masterPulseCounter (0-95)
+    // masterPulseCounter 0-23 = Beat 0, 24-47 = Beat 1, etc.
+    arpeggiatorBeatCounter = masterPulseCounter / 24;
   }
   lastArpeggiatorRawProgress = currentRawProgress;
 
   // Calculate continuous progress across 4 beats (0.0 to 4.0)
-  float continuousProgress = (float)arpeggiatorBeatCounter + currentRawProgress;
+  float continuousProgress;
+  if (!(midiClockRunning || midiClockActive)) {
+    continuousProgress = (float)arpeggiatorBeatCounter + currentRawProgress;
+  } else {
+    // Hochpräzise kontinuierliche Phase aus Pulsen
+    continuousProgress = (float)masterPulseCounter / 24.0;
+  }
   
   // Scaled progress determines the trigger points
   float scaledProgress = continuousProgress * divisions;
@@ -156,8 +188,9 @@ void updateArpeggiatorMode() {
   // Trigger Logic: Prüfe ob Master-Phase eine Schwelle überschritten hat (Phasen-Lock zum Tap Tempo)
   bool trigger = false;
 
-  if (midiClockRunning) {
-    // Hochpräziser Sync zur internen MIDI Clock
+  // Nutze Pulse-Sync wenn entweder der interne Generator oder eine externe Clock läuft
+  if (midiClockRunning || midiClockActive) {
+    // Hochpräziser Sync zur MIDI Clock (Intern oder Extern)
     int pulsesPerStep = (int)(24.0 / divisions);
     if (pulsesPerStep < 1) pulsesPerStep = 1;
 

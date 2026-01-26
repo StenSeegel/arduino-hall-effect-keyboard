@@ -20,6 +20,16 @@
 #ifndef MIDI_CLOCK_RECEIVER_H
 #define MIDI_CLOCK_RECEIVER_H
 
+#include "ArduinoTapTempo.h"
+
+// ============================================
+// EXTERNAL VARIABLES & FUNCTIONS
+// ============================================
+extern ArduinoTapTempo tapTempo;
+extern void syncMidiClockPhase();
+extern void handleExternalClockPulse();
+extern void resetArpeggiatorPhase();
+
 // ============================================
 // MIDI CLOCK RECEIVER STATE
 // ============================================
@@ -29,7 +39,7 @@ unsigned long lastMidiClockMicros = 0;
 uint16_t calculatedBPM = 120; // uint16_t statt float spart 2 bytes
 
 // Timeout Configuration
-#define MIDI_CLOCK_TIMEOUT_MICROS 300000UL  // 300ms ohne Clock = Timeout
+#define MIDI_CLOCK_TIMEOUT_MICROS 500000UL  // erhöht auf 500ms für mehr Stabilität (ca. 12 Pulses bei 30 BPM)
 
 // MIDI System Realtime Messages (1 byte, kein Status-Byte-Logik nötig)
 #define MIDI_CLOCK_MSG      0xF8
@@ -51,6 +61,7 @@ inline void processMidiClock() {
   // Optimiert: Verwendet statische lokale Variable statt globaler
   static unsigned long lastBeatMicros = 0;
   static uint8_t pulseCount = 0;
+  static bool firstBPMCalculation = true;
   
   pulseCount++;
   if (pulseCount >= 24) {
@@ -76,6 +87,9 @@ inline void processMidiClock() {
   
   lastMidiClockMicros = currentMicros;
   midiClockActive = true;
+  
+  // Update globale Taktphase direkt über den Pulse (verhindert Drift)
+  handleExternalClockPulse();
 }
 
 /**
@@ -84,6 +98,9 @@ inline void processMidiClock() {
 inline void processMidiStart() {
   lastMidiClockMicros = micros();
   midiClockActive = true;
+  syncMidiClockPhase();
+  resetArpeggiatorPhase();
+  tapTempo.resetTapChain(); // Interne Phase des TapTempos (für LEDs etc.) resetten
 }
 
 /**
@@ -92,6 +109,9 @@ inline void processMidiStart() {
 inline void processMidiContinue() {
   lastMidiClockMicros = micros();
   midiClockActive = true;
+  syncMidiClockPhase();
+  resetArpeggiatorPhase();
+  tapTempo.resetTapChain();
 }
 
 /**
@@ -147,8 +167,6 @@ void updateMidiClockReceiver() {
   if (midiClockActive) {
     if ((micros() - lastMidiClockMicros) > MIDI_CLOCK_TIMEOUT_MICROS) {
       midiClockActive = false;
-      // Debug Output optional
-      // Serial.println("MIDI Clock: TIMEOUT");
     }
   }
 }

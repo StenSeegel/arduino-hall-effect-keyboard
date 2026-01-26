@@ -69,6 +69,7 @@ extern bool switch_held[NUM_SWITCHES];
 
 // Function Switch State
 extern unsigned long functionSwitchPressTime[NUM_FUNCTION_SWITCHES];
+extern unsigned long functionSwitchPressMicros[NUM_FUNCTION_SWITCHES];
 extern bool functionSwitchLongPressed[NUM_FUNCTION_SWITCHES];
 
 // Externals defined elsewhere
@@ -86,6 +87,7 @@ bool switch_triggered[NUM_SWITCHES];
 bool switch_released[NUM_SWITCHES];
 bool switch_held[NUM_SWITCHES];
 unsigned long functionSwitchPressTime[NUM_FUNCTION_SWITCHES];
+unsigned long functionSwitchPressMicros[NUM_FUNCTION_SWITCHES];
 bool functionSwitchLongPressed[NUM_FUNCTION_SWITCHES];
 
 // ============================================

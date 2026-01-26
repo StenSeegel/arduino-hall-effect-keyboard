@@ -85,13 +85,21 @@ void updateClockInterval() {
 }
 
 /**
+ * Setzt die Phase der internen Clock zurück.
+ * Nützlich bei Empfang von externem MIDI Start.
+ */
+void syncMidiClockPhase() {
+  ppqnCounter = 0;
+  masterPulseCounter = 0;
+  lastClockMicros = micros();
+}
+
+/**
  * Sende MIDI Clock Start Message
  */
 void startMidiClock() {
   Serial1.write(MIDI_START);
-  ppqnCounter = 0;
-  masterPulseCounter = 0;
-  lastClockMicros = micros();
+  syncMidiClockPhase();
   midiClockRunning = true;
 }
 
@@ -113,6 +121,20 @@ void continueMidiClock() {
 }
 
 /**
+ * Verarbeitet einen externen MIDI Clock Pulse.
+ * Synchronisiert die interne Phase mit der externen Quelle,
+ * um Drift zu vermeiden.
+ */
+void handleExternalClockPulse() {
+  ppqnCounter = (ppqnCounter + 1) % PPQN_VALUE;
+  masterPulseCounter = (masterPulseCounter + 1) % 96;
+  
+  // Setze den internen Timer zurück, damit der hausinterne Generator
+  // nicht im Konflikt mit dem externen Takt eigene Pulse sendet.
+  lastClockMicros = micros();
+}
+
+/**
  * Synchronisiere Clock bei BPM-Änderung
  * Rufe auf wenn tapTempo.update() einen neuen Tap erkennt
  */
@@ -131,7 +153,9 @@ void syncMidiClockToBPM() {
  * Sendet MIDI Clock Pulse (0xF8) alle clockIntervalMicros
  */
 void updateMidiClockGenerator() {
-  if (!midiClockRunning) return;
+  // Wenn externe Clock aktiv ist, pausieren wir den internen Timer-basierten Generator,
+  // da wir stattdessen über handleExternalClockPulse() synchronisiert werden.
+  if (!midiClockRunning || midiClockActive) return; 
   
   unsigned long currentMicros = micros();
   

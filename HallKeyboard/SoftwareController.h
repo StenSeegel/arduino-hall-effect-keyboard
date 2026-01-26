@@ -95,6 +95,7 @@ bool savedPlayModeActiveBeforeArp = false;
 
 // Forward Declarations für Arpeggiator Synchronisation
 extern void resetArpeggiatorPhase();
+extern bool arpWaitingForSync;
 
 // New: Reference counting for overlapping chords in Additive Hold
 uint8_t holdModeNoteRefCount[128];
@@ -113,6 +114,11 @@ bool savedArpeggiatorActiveBeforeSubmenu = false;
 // ============================================
 extern int currentOctave;
 extern ArduinoTapTempo tapTempo;
+extern bool midiClockActive;
+extern uint16_t calculatedBPM;
+extern void syncMidiClockPhase();
+extern void syncMidiClockToBPM();
+extern int bpmPriorityBeats;
 extern void sendMidiNote(int cmd, int pitch, int velocity);
 extern void setLED(int switchIndex, bool on, bool skipLEDs = false);
 extern void confirmLED(int switchIndex);
@@ -247,54 +253,17 @@ void toggleChordModeOnOff() {
 void toggleArpeggiatorOnOff() {
   arpeggiatorActive = !arpeggiatorActive;
   
-  if (!arpeggiatorActive) {
-    // MIDI Clock Synchronisation: STOP (wenn konfiguriert)
-    if (stopClockOnArpDeactivate) {
-      stopMidiClock();
-    }
-
-    // 1. Arpeggiator stoppen
-    if (currentArpeggiatorPlayingNote >= 0 && currentArpeggiatorPlayingNote < 128) {
-      sendMidiNote(0x80, currentArpeggiatorPlayingNote, 0);
-      currentArpeggiatorPlayingNote = -1;
-    }
-    arpeggiatorNoteIsOn = false;
-    // Wir löschen die Noten NICHT (clearArpeggiatorNotes() entfernt), für Persistenz
-    // Aber wir senden auch keine statischen Note-Ons mehr für Hold (Wunsch des Users)
-
-    // Wenn Auto-Hold durch Arp aktiviert wurde, jetzt wieder ausschalten
-    if (autoHoldActivatedByArp) {
-      playModeActive = savedPlayModeActiveBeforeArp;
-      playModeType = savedPlayModeTypeBeforeArp;
-      
-      // Berechne hold/additive states neu basierend auf dem alten Typ
-      holdMode = (playModeActive && (playModeType == PLAY_MODE_HOLD || playModeType == PLAY_MODE_ADDITIVE));
-      additiveMode = (playModeActive && playModeType == PLAY_MODE_ADDITIVE);
-      
-      autoHoldActivatedByArp = false;
-      
-      // LEDs aufräumen
-      for (int i = 0; i < NUM_SWITCHES; i++) {
-        heldNotes[i] = false;
-        setLED(i, false);
-      }
-      // Auch alle gehaltenen Noten stoppen
-      for (int i = 0; i < 128; i++) {
-        if (holdModeMidiNotes[i]) {
-          sendMidiNote(0x90, i, 0x00);
-          holdModeMidiNotes[i] = false;
-        }
-      }
-      //Serial.println("Sequence Mode Auto-Hold deaktiviert - Reset auf Vorzustand");
-    }
-  } else {
-    // MIDI Clock Synchronisation: START
-    startMidiClock();
+  if (arpeggiatorActive) {
+    // Neu: Warte auf den nächsten Downbeat (1)
+    arpWaitingForSync = true;
     
-    // Arpeggiator Phase Reset für Synchronisation
-    tapTempo.resetTapChain(); // Setzt Master-Beat auf "jetzt"
-    resetArpeggiatorPhase();  // Setzt Arp-Trigger-Logik zurück
-
+    // Nur MIDI START/Phase Reset senden, wenn wir MASTER sind (keine externe Clock)
+    if (!midiClockActive) {
+      startMidiClock();
+      tapTempo.resetTapChain(); // Setzt Master-Beat auf "jetzt"
+      resetArpeggiatorPhase();  // Setzt Arp-Trigger-Logik zurück
+    }
+    
     // 1. Statische Hold-Noten stoppen, wenn sie gespielt werden
     if (holdMode) {
       for (int i = 0; i < 128; i++) {
@@ -351,11 +320,46 @@ void toggleArpeggiatorOnOff() {
         //Serial.println("Sequence Mode Auto-Hold (Additive) aktiviert");
       }
     }
+  } else {
+    // Arpeggiator ausschalten
+    
+    // MIDI Clock Synchronisation: STOP (wenn konfiguriert)
+    if (stopClockOnArpDeactivate) {
+      stopMidiClock();
+    }
+
+    // 1. Arpeggiator stoppen
+    if (currentArpeggiatorPlayingNote >= 0 && currentArpeggiatorPlayingNote < 128) {
+      sendMidiNote(0x80, currentArpeggiatorPlayingNote, 0);
+      currentArpeggiatorPlayingNote = -1;
+    }
+    arpeggiatorNoteIsOn = false;
+
+    // Wenn Auto-Hold durch Arp aktiviert wurde, jetzt wieder ausschalten
+    if (autoHoldActivatedByArp) {
+      playModeActive = savedPlayModeActiveBeforeArp;
+      playModeType = savedPlayModeTypeBeforeArp;
+      
+      // Berechne hold/additive states neu basierend auf dem alten Typ
+      holdMode = (playModeActive && (playModeType == PLAY_MODE_HOLD || playModeType == PLAY_MODE_ADDITIVE));
+      additiveMode = (playModeActive && playModeType == PLAY_MODE_ADDITIVE);
+      
+      autoHoldActivatedByArp = false;
+      
+      // LEDs aufräumen
+      for (int i = 0; i < NUM_SWITCHES; i++) {
+        heldNotes[i] = false;
+        setLED(i, false);
+      }
+      // Auch alle gehaltenen Noten stoppen
+      for (int i = 0; i < 128; i++) {
+        if (holdModeMidiNotes[i]) {
+          sendMidiNote(0x90, i, 0x00);
+          holdModeMidiNotes[i] = false;
+        }
+      }
+    }
   }
-  
-  //Serial.print("Arpeggiator Mode: ");
-  //Serial.println(arpeggiatorActive ? "EIN" : "AUS");
-  
 }
 
 void enterSubmenuPage(int submenuNumber, int page);
@@ -627,8 +631,32 @@ void handleShortPress(int fsNumber) {
       case 2: toggleChordModeOnOff(); break;
       case 3: toggleArpeggiatorOnOff(); break;
       case 4:
-        //Serial.print("Tap Tempo registriert - BPM: ");
-        //Serial.println(tapTempo.getBPM());
+        if (midiClockActive) {
+          // NEU: Hochpräziser Phase-Reset basierend auf dem BUTTON DOWN Zeitpunkt
+          // Wir kompensieren die Zeit, die der User den Knopf gehalten hat.
+          unsigned long deltaMicros = micros() - functionSwitchPressMicros[3];
+          
+          // Dauer eines einzelnen MIDI-Pulses in Mikrosekunden
+          float pulseLenMicros = (60000000.0 / (float)calculatedBPM) / 24.0;
+          
+          // Berechne wie viele Pulse seit dem Niederdrücken vergangen sind
+          uint16_t pulsesSinceDown = (uint16_t)(deltaMicros / pulseLenMicros);
+          
+          // Setze die globale Master-Phase so, dass der DOWN-Event exakt die "1" war.
+          // Wir addieren pulsesSinceDown, da wir jetzt "pulsesSinceDown" nach der 1 sind.
+          extern uint16_t masterPulseCounter;
+          extern uint16_t ppqnCounter;
+          masterPulseCounter = pulsesSinceDown % 96;
+          ppqnCounter = pulsesSinceDown % 24;
+
+          // Arpeggiator stoppen und auf den nächsten Taktanfang (die jetzt korrigierte 1) warten
+          resetArpeggiatorPhase();
+          arpWaitingForSync = true;
+        } else {
+          // Tap Tempo Downbeat Sync bei interner Clock
+          bpmPriorityBeats = 8;
+          syncMidiClockToBPM();
+        }
         break;
     }
   }
@@ -641,6 +669,7 @@ void handleFunctionSwitches() {
   for (int i = 0; i < NUM_FUNCTION_SWITCHES; i++) {
     if (functionSwitches[i].trigger()) {
       functionSwitchPressTime[i] = millis();
+      functionSwitchPressMicros[i] = micros();
       functionSwitchLongPressed[i] = false;
     }
     

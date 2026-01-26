@@ -131,25 +131,29 @@ void loop() {
   
   // Update Tap Tempo (registriert die Tempo-Taps von FS4)
   // Tempo-Taps nur im Hauptmenü (nicht im Submenü) zulassen!
-  // MIDI Clock hat Vorrang - TapTempo nur aktiv wenn kein externes Clock
+  // Trigger-Logik (Phase Reset / Downbeat Sync) wird jetzt in SoftwareController.h gehandelt.
   if (!inSubmenu && !midiClockActive) {
-    if (functionSwitches[3].trigger()) {
-      bpmPriorityBeats = 8;
-      syncMidiClockToBPM(); // MIDI Clock neu ausrichten und Intervall updaten
-    }
     tapTempo.update(functionSwitches[3].isDown());
   } else {
-    // Im Submenü oder bei MIDI Clock: Button-Input ignorieren (false senden)
+    // Im Submenü oder bei MIDI Clock: Button-Input für Tap-Tempo ignorieren
     tapTempo.update(false);
   }
   
   // BPM Change Detection für MIDI Clock
   // Prüfe sowohl TapTempo als auch MIDI Clock Input
-  static float lastBpmForClock = 0;
-  float currentBpm = midiClockActive ? (float)calculatedBPM : tapTempo.getBPM();
-  if (abs(currentBpm - lastBpmForClock) > 0.1) {
+  static float lastBpmForSystem = 0;
+  bool isExternal = midiClockActive;
+  float currentBpm = isExternal ? (float)calculatedBPM : tapTempo.getBPM();
+  
+  if (abs(currentBpm - lastBpmForSystem) > 0.1) {
+    if (isExternal) {
+      // Wenn externes MIDI aktiv, synchronisiere das interne TapTempo-Objekt
+      // damit auch nachgelagerte Funktionen (wie Arp Duty Cycle) stimmen.
+      tapTempo.setBPM(currentBpm);
+    }
+    
     updateClockInterval();
-    lastBpmForClock = currentBpm;
+    lastBpmForSystem = currentBpm;
   }
   
   // Update Arpeggiator Playback (von ArpeggiatorMode.h)
