@@ -21,9 +21,9 @@
 #include <Adafruit_NeoPixel.h>
 
 extern Adafruit_NeoPixel pixels;
-extern bool activeMidiNotes[128];
-extern bool holdModeMidiNotes[128];
-extern bool chordModeMidiNotes[128];
+extern uint8_t activeMidiNotes[16];
+extern uint8_t holdModeMidiNotes[16];
+extern uint8_t chordModeMidiNotes[16];
 
 // ============================================
 // CHORD MODE CONFIGURATION & CONSTANTS
@@ -62,15 +62,15 @@ extern bool chordModeMidiNotes[128];
 #define ROOT_AS 10
 #define ROOT_B 11
 
-int chordModeType = 0;              // 0=off, 1=extended, 2=folded
-int scaleType = 0;                  // 0-8: Alle diatonischen Modi + Power Chords
-int diatonicRootKey = 0;            // 0-11 entspricht C-B
-int chordExtensionType = CHORD_EXT_TRIAD; // 0=Triad, 1=7th, 2=7th+8th
+int8_t chordModeType = 0;              // 0=off, 1=extended, 2=folded
+int8_t scaleType = 0;                  // 0-8: Alle diatonischen Modi + Power Chords
+int8_t diatonicRootKey = 0;            // 0-11 entspricht C-B
+uint8_t chordExtensionType = CHORD_EXT_TRIAD; // 0=Triad, 1=7th, 2=7th+8th
 
-const int maxChordNotes = 5;
+const uint8_t maxChordNotes = 5;
 
 // Akkordtypen: [Index] = {Semitone offsets}
-const int chordDefinitions[7][5] = {
+const int8_t chordDefinitions[7][5] PROGMEM = {
   {0, 4, 7, -1, -1},    // 0 = Major
   {0, 3, 7, -1, -1},    // 1 = Minor
   {0, 7, -1, -1, -1},   // 2 = Power 5 (ohne 3. Note)
@@ -81,23 +81,30 @@ const int chordDefinitions[7][5] = {
 };
 
 // Diatonische Akkord-Muster für alle 7 Modi
-const int diatonicChordPattern[7] = {0, 1, 1, 0, 0, 1, 6};  // Major, minor, minor, Major, Major, minor, Dim
+const int8_t diatonicChordPattern[7] PROGMEM = {0, 1, 1, 0, 0, 1, 6};  // Major, minor, minor, Major, Major, minor, Dim
 
 // Intervallo-Pattern für alle diatonischen Modi
-const int modeStepIntervals[7] = {2, 2, 1, 2, 2, 2, 1};  // Intervalle für Ionian
+const int8_t modeStepIntervals[7] PROGMEM = {2, 2, 1, 2, 2, 2, 1};  // Intervalle für Ionian
 
 // ============================================
 // EXTERN VARIABLES (from HallKeyboard.ino / HardwareController.h)
 // ============================================
-extern int currentOctave;           // Aktuelle Oktave
-extern const int midiNotes[13];     // MIDI Notes für die Tasten
+extern int8_t currentOctave;           // Aktuelle Oktave
+extern const uint8_t midiNotes[13];     // MIDI Notes für die Tasten
+extern void sendMidiNote(int cmd, int pitch, int velocity);
 
 // ============================================
 // CHORD MODE STATE
 // ============================================
 
 // Tracke welche Noten im Chord Mode gerade spielen
-bool chordModeMidiNotes[128];        // Welche MIDI-Noten sind von Chord Mode aktiv
+uint8_t chordModeMidiNotes[16];        // Welche MIDI-Noten sind von Chord Mode aktiv
+
+#define IS_NOTE_ACTIVE(n) ((activeMidiNotes[(n) >> 3] >> ((n) & 7)) & 1)
+#define SET_NOTE_ACTIVE(n, v) if(v) activeMidiNotes[(n) >> 3] |= (1 << ((n) & 7)); else activeMidiNotes[(n) >> 3] &= ~(1 << ((n) & 7))
+#define IS_CHORD_NOTE_ACTIVE(n) ((chordModeMidiNotes[(n) >> 3] >> ((n) & 7)) & 1)
+#define SET_CHORD_NOTE_ACTIVE(n, v) if(v) chordModeMidiNotes[(n) >> 3] |= (1 << ((n) & 7)); else chordModeMidiNotes[(n) >> 3] &= ~(1 << ((n) & 7))
+#define CLEAR_CHORD_NOTES() for(int _i=0; _i<16; _i++) chordModeMidiNotes[_i] = 0
 
 // ============================================
 // HELPER FUNCTIONS (Migriert von HallKeyboard.ino)
@@ -109,7 +116,7 @@ bool chordModeMidiNotes[128];        // Welche MIDI-Noten sind von Chord Mode ak
 int getModeNote(int degree, int mode) {
   int semitones = 0;
   for (int i = 0; i < degree; i++) {
-    semitones += modeStepIntervals[(i + mode) % 7];
+    semitones += pgm_read_byte(&modeStepIntervals[(i + mode) % 7]);
   }
   return semitones;
 }
@@ -118,7 +125,7 @@ int getModeNote(int degree, int mode) {
  * Prüfe ob eine Note in der diatonischen Tonleiter ist
  */
 bool isDiatonicNote(int switchIndex) {
-  int noteOffset = (midiNotes[switchIndex] - diatonicRootKey + 12) % 12;
+  int noteOffset = (pgm_read_byte(&midiNotes[switchIndex]) - diatonicRootKey + 12) % 12;
   
   if (scaleType >= 0 && scaleType <= 6) {
     for (int i = 0; i < 7; i++) {
@@ -136,7 +143,7 @@ bool isDiatonicNote(int switchIndex) {
  * Bestimme den Akkordtyp basierend auf diatonischem Grad
  */
 int getDiatonicChordType(int switchIndex) {
-  int noteOffset = (midiNotes[switchIndex] - diatonicRootKey + 12) % 12;
+  int noteOffset = (pgm_read_byte(&midiNotes[switchIndex]) - diatonicRootKey + 12) % 12;
   
   int diatonicDegree = -1;
   for (int i = 0; i < 7; i++) {
@@ -152,7 +159,7 @@ int getDiatonicChordType(int switchIndex) {
   
   if (scaleType >= 0 && scaleType <= 6) {
     int modalIndex = (diatonicDegree + scaleType) % 7;
-    return diatonicChordPattern[modalIndex];
+    return pgm_read_byte(&diatonicChordPattern[modalIndex]);
   } else {
     return 0;  // Major
   }
@@ -162,7 +169,7 @@ int getDiatonicChordType(int switchIndex) {
  * Hole eine diatonische Akkord-Note (Triad/7th/7th+8th)
  */
 int getDiatonicChordNote(int switchIndex, int noteIndex) {
-  int noteOffset = (midiNotes[switchIndex] - diatonicRootKey + 12) % 12;
+  int noteOffset = (pgm_read_byte(&midiNotes[switchIndex]) - diatonicRootKey + 12) % 12;
   int diatonicDegree = -1;
   for (int i = 0; i < 7; i++) {
     if (noteOffset == getModeNote(i, scaleType)) {
@@ -209,7 +216,7 @@ int getChordNote(int switchIndex, int variationType, int noteIndex) {
       chordDefIndex = 0;
   }
 
-  return chordDefinitions[chordDefIndex][noteIndex];
+  return pgm_read_byte(&chordDefinitions[chordDefIndex][noteIndex]);
 }
 
 // ============================================
@@ -217,9 +224,7 @@ int getChordNote(int switchIndex, int variationType, int noteIndex) {
 // ============================================
 
 void initChordMode() {
-  for (int i = 0; i < 128; i++) {
-    chordModeMidiNotes[i] = false;
-  }
+  CLEAR_CHORD_NOTES();
   chordExtensionType = CHORD_EXT_TRIAD;
 }
 
@@ -234,7 +239,7 @@ void initChordMode() {
  *   - Aktualisiert chordModeMidiNotes[] Array mit allen Noten
  */
 void playChordNotes(int switchIndex, bool isFolded = false) {
-  int baseNote = midiNotes[switchIndex] + (currentOctave * 12);
+  int baseNote = pgm_read_byte(&midiNotes[switchIndex]) + (currentOctave * 12);
   
   // Berechne Akkord-Typ
   int chordDefIndex = 0;
@@ -269,7 +274,7 @@ void playChordNotes(int switchIndex, bool isFolded = false) {
       
       // Markiere Note als aktiv
       if (chordNote >= 0 && chordNote < 128) {
-        chordModeMidiNotes[chordNote] = true;
+        SET_CHORD_NOTE_ACTIVE(chordNote, true);
       }
     }
   }
@@ -281,7 +286,7 @@ void playChordNotes(int switchIndex, bool isFolded = false) {
 void stopChordNotes(int switchIndex = -1) {
   if (switchIndex >= 0) {
     // Nur für einen Switch - berechne welche Noten zu stoppen sind
-    int baseNote = midiNotes[switchIndex] + (currentOctave * 12);
+    int baseNote = pgm_read_byte(&midiNotes[switchIndex]) + (currentOctave * 12);
     
     for (int j = 0; j < maxChordNotes; j++) {
       int noteOffset = getChordNote(switchIndex, scaleType, j);
@@ -294,24 +299,20 @@ void stopChordNotes(int switchIndex = -1) {
         }
         
         if (chordNote >= 0 && chordNote < 128) {
-          chordModeMidiNotes[chordNote] = false;
+          SET_CHORD_NOTE_ACTIVE(chordNote, false);
         }
       }
     }
   } else {
     // Alle Noten stoppen
-    for (int i = 0; i < 128; i++) {
-      if (chordModeMidiNotes[i]) {
-        chordModeMidiNotes[i] = false;
-      }
-    }
+    CLEAR_CHORD_NOTES();
   }
 }
 
 /**
  * Gib Array von aktiven Chord Mode Noten
  */
-bool* getChordModeNotes() {
+uint8_t* getChordModeNotes() {
   return chordModeMidiNotes;
 }
 
@@ -358,17 +359,14 @@ void turnOnChordNotesImpl(int switchIndex, bool isFolded) {
       
       if (chordNote >= 0 && chordNote < 128) {
         // Send MIDI Note On
-        Serial1.write(0x90);
-        Serial1.write(chordNote);
-        Serial1.write(0x45);
-        activeMidiNotes[chordNote] = true;
+        sendMidiNote(0x90, chordNote, 0x45);
         
         // Update LED für diese Note
         int displaySwitchIndex = (chordNote == (currentOctave + 1) * 12) ? 12 : (chordNote % 12);
         if (displaySwitchIndex >= 0 && displaySwitchIndex < NUM_SWITCHES) {
-          int ledIndex = ledMapping[displaySwitchIndex];
+          int ledIndex = pgm_read_byte(&ledMapping[displaySwitchIndex]);
           if (ledIndex >= 0) {
-            uint32_t color = isBlackKey[displaySwitchIndex] ? 0xFF69B4 : 0xFFFFFF;
+            uint32_t color = pgm_read_byte(&isBlackKey[displaySwitchIndex]) ? 0xFF69B4 : 0xFFFFFF;
             uint8_t r = (color >> 16) & 0xFF;
             uint8_t g = (color >> 8) & 0xFF;
             uint8_t b = color & 0xFF;
@@ -386,7 +384,7 @@ void turnOnChordNotesImpl(int switchIndex, bool isFolded) {
  * Schalte alle Noten eines Akkords OFF
  */
 void turnOffChordNotesImpl(int switchIndex, bool isFolded) {
-  int baseNote = midiNotes[switchIndex] + (currentOctave * 12);
+  int baseNote = pgm_read_byte(&midiNotes[switchIndex]) + (currentOctave * 12);
   
   for (int j = 0; j < maxChordNotes; j++) {
     int noteOffset = getChordNote(switchIndex, scaleType, j);
@@ -399,15 +397,12 @@ void turnOffChordNotesImpl(int switchIndex, bool isFolded) {
       
       if (chordNote >= 0 && chordNote < 128) {
         // Send MIDI Note Off
-        Serial1.write(0x90);
-        Serial1.write(chordNote);
-        Serial1.write(0x00);
-        activeMidiNotes[chordNote] = false;
+        sendMidiNote(0x90, chordNote, 0x00);
         
         // Update LED für diese Note
         int displaySwitchIndex = (chordNote == (currentOctave + 1) * 12) ? 12 : (chordNote % 12);
         if (displaySwitchIndex >= 0 && displaySwitchIndex < NUM_SWITCHES) {
-          int ledIndex = ledMapping[displaySwitchIndex];
+          int ledIndex = pgm_read_byte(&ledMapping[displaySwitchIndex]);
           if (ledIndex >= 0) {
             pixels.setPixelColor(ledIndex, 0);
           }

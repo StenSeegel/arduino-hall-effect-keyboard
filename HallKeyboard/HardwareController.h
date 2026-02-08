@@ -18,37 +18,38 @@
 
 #include "button.h"
 #include "arduino_stubs.h"
+#include <avr/pgmspace.h>
 
 // ============================================
 // HARDWARE CONSTANTS
 // ============================================
 
-const int NUM_SWITCHES = 13;
+const uint8_t NUM_SWITCHES = 13;
 
 // Pin-Belegung für alle 13 Switches
-const int switchPins[NUM_SWITCHES] = {
+const uint8_t switchPins[NUM_SWITCHES] PROGMEM = {
   2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
   18 // D18 (A4) als Digital
 };
 
 // MIDI Noten für jeden Switch (C bis C, relativ zu Oktave 0)
-const int midiNotes[NUM_SWITCHES] = {
+const uint8_t midiNotes[NUM_SWITCHES] PROGMEM = {
   0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 };
 
 // LED-Mapping: Switch-Index -> LED-Index
-const int ledMapping[NUM_SWITCHES] = {
+const uint8_t ledMapping[NUM_SWITCHES] PROGMEM = {
   0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6, 7
 };
 
 // Array zum Identifizieren von schwarzen Tasten
-const bool isBlackKey[NUM_SWITCHES] = {
+const bool isBlackKey[NUM_SWITCHES] PROGMEM = {
   false, true, false, true, false, false, true, false, true, false, true, false, false
 };
 
 // Funktions-Schalter (4 Schalter an A1-A4)
-const int NUM_FUNCTION_SWITCHES = 4;
-const int functionSwitchPins[NUM_FUNCTION_SWITCHES] = {
+const uint8_t NUM_FUNCTION_SWITCHES = 4;
+const uint8_t functionSwitchPins[NUM_FUNCTION_SWITCHES] PROGMEM = {
   A1, A2, A3, A4
 };
 
@@ -73,7 +74,7 @@ extern unsigned long functionSwitchPressMicros[NUM_FUNCTION_SWITCHES];
 extern bool functionSwitchLongPressed[NUM_FUNCTION_SWITCHES];
 
 // Externals defined elsewhere
-extern int currentOctave;
+extern int8_t currentOctave;
 
 // ============================================
 // HARDWARE CONTROLLER: Buttons & Pins (Actual Instance)
@@ -100,7 +101,7 @@ bool functionSwitchLongPressed[NUM_FUNCTION_SWITCHES];
 void setupHardwareController() {
   // Alle Switch-Pins initialisieren
   for (int i = 0; i < NUM_SWITCHES; i++) {
-    switches[i].begin(switchPins[i]);
+    switches[i].begin(pgm_read_byte(&switchPins[i]));
     switch_triggered[i] = false;
     switch_released[i] = false;
     switch_held[i] = false;
@@ -114,7 +115,9 @@ void setupHardwareController() {
   
   // Funktions-Schalter initialisieren
   for (int i = 0; i < NUM_FUNCTION_SWITCHES; i++) {
-    functionSwitches[i].begin(functionSwitchPins[i]);
+    switches[i].begin(pgm_read_byte(&switchPins[i])); // This was wrong in the original too? Wait.
+    // The original code used A1, A2, A3, A4 directly.
+    functionSwitches[i].begin(pgm_read_byte(&functionSwitchPins[i]));
     functionSwitchLongPressed[i] = false;
     functionSwitchPressTime[i] = 0;
   }
@@ -150,7 +153,7 @@ int getHardwareMIDINote(int switchIndex) {
   if (switchIndex < 0 || switchIndex >= NUM_SWITCHES) {
     return -1;
   }
-  return midiNotes[switchIndex] + (currentOctave * 12);
+  return pgm_read_byte(&midiNotes[switchIndex]) + (currentOctave * 12);
 }
 
 #endif

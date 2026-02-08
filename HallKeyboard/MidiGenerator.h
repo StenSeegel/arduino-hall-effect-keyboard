@@ -26,25 +26,32 @@
 // ============================================
 
 // Tracke alle aktiven MIDI-Noten (von allen Modi kombiniert)
-bool activeMidiNotes[128];
+// Eingespart: Bitset statt bool[128]
+uint8_t activeMidiNotes[16];
+
+#define IS_NOTE_ACTIVE(n) ((activeMidiNotes[(n) >> 3] >> ((n) & 7)) & 1)
+#define SET_NOTE_ACTIVE(n, v) if(v) activeMidiNotes[(n) >> 3] |= (1 << ((n) & 7)); else activeMidiNotes[(n) >> 3] &= ~(1 << ((n) & 7))
+
+#define IS_HOLD_NOTE_ACTIVE(n) ((holdModeMidiNotes[(n) >> 3] >> ((n) & 7)) & 1)
+#define SET_HOLD_NOTE_ACTIVE(n, v) if(v) holdModeMidiNotes[(n) >> 3] |= (1 << ((n) & 7)); else holdModeMidiNotes[(n) >> 3] &= ~(1 << ((n) & 7))
 
 // ============================================
 // EXTERN VARIABLES (Synchronisiert mit HallKeyboard.ino / Controller)
 // ============================================
-extern int currentOctave;
-extern int scaleType;
-extern int chordModeType;
+extern int8_t currentOctave;
+extern int8_t scaleType;
+extern int8_t chordModeType;
 extern bool chordModeActive;
 extern bool arpeggiatorActive;
 extern bool holdMode;
 extern bool additiveMode;
-extern int heldNote;
-extern int heldSwitchIdx;
+extern int8_t heldNote;
+extern int8_t heldSwitchIdx;
 extern bool heldNotes[NUM_SWITCHES];
-extern bool holdModeMidiNotes[128];
+extern uint8_t holdModeMidiNotes[16];
 extern bool chordNotesActive[NUM_SWITCHES];
-extern const int maxChordNotes;
-extern const int midiNotes[13];
+extern const uint8_t maxChordNotes;
+extern const uint8_t midiNotes[13];
 
 // Callback Funktionen für die Modi (in HallKeyboard.ino oder den Mode-Dateien)
 extern int getChordNote(int switchIndex, int variationType, int noteIndex);
@@ -56,8 +63,8 @@ extern void addNoteToArpeggiatorMode(int note);
 // ============================================
 
 void initMidiGenerator() {
-  for (int i = 0; i < 128; i++) {
-    activeMidiNotes[i] = false;
+  for (int i = 0; i < 16; i++) {
+    activeMidiNotes[i] = 0;
   }
 }
 
@@ -76,8 +83,8 @@ void killAllMidiNotes() {
     Serial1.write(0x80); 
     Serial1.write(i);
     Serial1.write(0);
-    activeMidiNotes[i] = false;
   }
+  for (int i = 0; i < 16; i++) activeMidiNotes[i] = 0;
 }
 
 /**
@@ -87,8 +94,7 @@ void killAllMidiNotes() {
 void sendMidiNote(int cmd, int pitch, int velocity) {
   if (pitch < 0 || pitch >= 128) return;
   
-  if (velocity > 0) activeMidiNotes[pitch] = true;
-  else activeMidiNotes[pitch] = false;
+  SET_NOTE_ACTIVE(pitch, (velocity > 0));
   
   Serial1.write(cmd);
   Serial1.write(pitch);
@@ -110,7 +116,7 @@ void handleMidiNoteEvent(int i, bool isTriggered, bool isReleased) {
     // 1. Akkord-Berechnung
     if (chordModeActive && chordModeType != 0) { // CHORD_MODE_OFF
       bool isFolded = (chordModeType == 2); // CHORD_MODE_FOLDED
-      int baseNote = midiNotes[i] + (currentOctave * 12);
+      int baseNote = pgm_read_byte(&midiNotes[i]) + (currentOctave * 12);
       numNotesToPlay = 0;
       for (int j = 0; j < maxChordNotes; j++) {
         int noteOffset = getChordNote(i, scaleType, j);
@@ -132,7 +138,7 @@ void handleMidiNoteEvent(int i, bool isTriggered, bool isReleased) {
     
     // 2. HOLD + ARP Special: Vorherige Note entfernen wenn Hold aktiv (Nur im Mono-Hold)
     if (holdMode && arpeggiatorActive && !additiveMode && heldSwitchIdx != -1 && heldSwitchIdx != i) {
-      int oldBaseNote = midiNotes[heldSwitchIdx] + (currentOctave * 12);
+      int oldBaseNote = pgm_read_byte(&midiNotes[heldSwitchIdx]) + (currentOctave * 12);
       if (chordModeActive && chordModeType != 0) {
         bool isFoldedCheck = (chordModeType == 2);
         for (int j = 0; j < maxChordNotes; j++) {
@@ -181,24 +187,24 @@ void handleMidiNoteEvent(int i, bool isTriggered, bool isReleased) {
         else removeNoteFromArpeggiatorMode(noteToPlay);
       } else if (holdMode) {
         if (additiveMode) {
-          if (holdModeMidiNotes[noteToPlay]) {
-            holdModeMidiNotes[noteToPlay] = false;
+          if (IS_HOLD_NOTE_ACTIVE(noteToPlay)) {
+            SET_HOLD_NOTE_ACTIVE(noteToPlay, false);
             sendMidiNote(0x90, noteToPlay, 0x00);
           } else {
-            holdModeMidiNotes[noteToPlay] = true;
+            SET_HOLD_NOTE_ACTIVE(noteToPlay, true);
             sendMidiNote(0x90, noteToPlay, 0x45);
           }
         } else {
           if (heldNote == noteToPlay) {
-            holdModeMidiNotes[noteToPlay] = false;
+            SET_HOLD_NOTE_ACTIVE(noteToPlay, false);
             sendMidiNote(0x90, noteToPlay, 0x00);
             heldNote = -1;
           } else {
             if (heldNote != -1) {
-              holdModeMidiNotes[heldNote] = false;
+              SET_HOLD_NOTE_ACTIVE(heldNote, false);
               sendMidiNote(0x90, heldNote, 0x00);
             }
-            holdModeMidiNotes[noteToPlay] = true;
+            SET_HOLD_NOTE_ACTIVE(noteToPlay, true);
             sendMidiNote(0x90, noteToPlay, 0x45);
             heldNote = noteToPlay;
           }
@@ -217,7 +223,7 @@ void handleMidiNoteEvent(int i, bool isTriggered, bool isReleased) {
     
     if (chordModeActive && chordModeType != 0) {
       bool isFolded = (chordModeType == 2);
-      int baseNote = midiNotes[i] + (currentOctave * 12);
+      int baseNote = pgm_read_byte(&midiNotes[i]) + (currentOctave * 12);
       numNotesToRelease = 0;
       for (int j = 0; j < maxChordNotes; j++) {
         int noteOffset = getChordNote(i, scaleType, j);
@@ -260,7 +266,7 @@ void updateMidiGenerator() {
  */
 void stopAllMidiNotes() {
   for (int note = 0; note < 128; note++) {
-    if (activeMidiNotes[note]) {
+    if (IS_NOTE_ACTIVE(note)) {
       sendMidiNote(0x90, note, 0x00);  // Note Off via Velocity 0
     }
   }
@@ -271,9 +277,7 @@ void stopAllMidiNotes() {
  */
 void resetMidiGenerator() {
   stopAllMidiNotes();
-  for (int i = 0; i < 128; i++) {
-    activeMidiNotes[i] = false;
-  }
+  initMidiGenerator();
 }
 
 #endif

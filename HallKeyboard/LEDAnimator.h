@@ -7,6 +7,7 @@
 #define LED_ANIMATOR_H
 
 #include <Adafruit_NeoPixel.h>
+#include <avr/pgmspace.h>
 #include "ArduinoTapTempo.h"
 
 extern Adafruit_NeoPixel pixels;
@@ -17,7 +18,7 @@ extern volatile bool midiClockActive; // From MidiClockReceiver
 // ============================================
 
 // Confirmation Blink State
-int confirmationSwitchIndex = -1;
+int8_t confirmationSwitchIndex = -1;
 unsigned long lastBlinkTime = 0;
 int blinkCounter = 0;
 bool blinkState = false;
@@ -32,7 +33,7 @@ unsigned long lastTapTempoLEDTime = 0;
 bool tapTempoLEDState = false;
 
 // Error LED State
-int errorLEDIndex = -1;
+int8_t errorLEDIndex = -1;
 unsigned long errorLEDStartTime = 0;
 const unsigned long ERROR_LED_DURATION = 200;
 
@@ -40,10 +41,10 @@ const unsigned long ERROR_LED_DURATION = 200;
 extern bool isIdle;
 extern bool inSubmenu;
 extern bool arpeggiatorActive;
-extern int bpmPriorityBeats;
+extern uint8_t bpmPriorityBeats;
 extern ArduinoTapTempo tapTempo;
 extern bool heldNotes[NUM_SWITCHES];
-extern const int ledMapping[NUM_SWITCHES];
+extern const uint8_t ledMapping[NUM_SWITCHES];
 extern const bool isBlackKey[NUM_SWITCHES];
 extern Button switches[NUM_SWITCHES];
 
@@ -160,7 +161,7 @@ void updateLEDMultiNoteBlink() {
       int activeCount = 0;
       int activeSwitches[2];
       for (int i = 0; i < NUM_SWITCHES; i++) {
-        if (ledMapping[i] == ledIndex && switches[i].isDown()) {
+        if (pgm_read_byte(&ledMapping[i]) == ledIndex && switches[i].isDown()) {
           if (activeCount < 2) {
             activeSwitches[activeCount] = i;
           }
@@ -170,7 +171,7 @@ void updateLEDMultiNoteBlink() {
       
       if (activeCount >= 2) {
         int switchIndex = ledBlinkState ? activeSwitches[0] : activeSwitches[1];
-        uint8_t colorIdx = isBlackKey[switchIndex] ? COLOR_PINK_IDX : COLOR_WHITE_IDX;
+        uint8_t colorIdx = pgm_read_byte(&isBlackKey[switchIndex]) ? COLOR_PINK_IDX : COLOR_WHITE_IDX;
         setLEDColor(ledIndex, colorIdx, 255);
       }
     }
@@ -196,7 +197,7 @@ void updateConfirmBlink() {
     if (currentTime - lastBlinkTime >= 300) {
       lastBlinkTime = currentTime;
       
-      int ledIndex = ledMapping[confirmationSwitchIndex];
+      int ledIndex = pgm_read_byte(&ledMapping[confirmationSwitchIndex]);
       
       if (ledIndex < 0) {
         confirmationSwitchIndex = -1;
@@ -211,7 +212,7 @@ void updateConfirmBlink() {
           return;
         }
       } else {
-        uint8_t colorIdx = isBlackKey[confirmationSwitchIndex] ? COLOR_PINK_IDX : COLOR_WHITE_IDX;
+        uint8_t colorIdx = pgm_read_byte(&isBlackKey[confirmationSwitchIndex]) ? COLOR_PINK_IDX : COLOR_WHITE_IDX;
         setLEDColor(ledIndex, colorIdx, 255);
       }
       blinkState = !blinkState;

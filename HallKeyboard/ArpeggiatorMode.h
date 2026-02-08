@@ -25,15 +25,19 @@
 // ARPEGGIATOR MODE STATE & CONFIG
 // ============================================
 
-bool arpeggiatorMidiNotes[128];
+uint8_t arpeggiatorMidiNotes[16];
 
-int arpeggiatorMode = 0;       // Default: ARPEGGIATOR_UP_DOWN (0)
-int arpeggiatorRate = 2;       // Default: RATE_EIGHTH
+#define IS_ARP_NOTE_ACTIVE(n) ((arpeggiatorMidiNotes[(n) >> 3] >> ((n) & 7)) & 1)
+#define SET_ARP_NOTE_ACTIVE(n, v) if(v) arpeggiatorMidiNotes[(n) >> 3] |= (1 << ((n) & 7)); else arpeggiatorMidiNotes[(n) >> 3] &= ~(1 << ((n) & 7))
+#define CLEAR_ARP_NOTES() for(int _i=0; _i<16; _i++) arpeggiatorMidiNotes[_i] = 0
+
+int8_t arpeggiatorMode = 0;       // Default: ARPEGGIATOR_UP_DOWN (0)
+uint8_t arpeggiatorRate = 2;       // Default: RATE_EIGHTH
 unsigned long lastArpeggiatorStepTime = 0;
 unsigned long arpeggiatorStepDuration = 250;
 unsigned long arpeggiatorNoteOnTime = 0;
-int arpeggiatorDutyCycle = 50;
-int currentArpeggiatorPlayingNote = -1;
+uint8_t arpeggiatorDutyCycle = 50;
+int8_t currentArpeggiatorPlayingNote = -1;
 bool arpeggiatorNoteIsOn = false;
 float lastArpeggiatorSyncProgress = 0;
 int arpeggiatorBeatCounter = 0;
@@ -41,10 +45,10 @@ float lastArpeggiatorRawProgress = 0;
 int lastArpeggiatorSyncPulse = -1; // Neu: Für präzisen MIDI Clock Sync
 bool arpWaitingForSync = false;    // Ob der ARP auf den nächsten Downbeat wartet
 
-int heldArpeggiatorNotes[32];
-int numHeldArpeggiatorNotes = 0;
+int8_t heldArpeggiatorNotes[32];
+int8_t numHeldArpeggiatorNotes = 0;
 uint8_t arpNoteRefCount[128];
-int currentArpeggiatorIndex = 0;
+int8_t currentArpeggiatorIndex = 0;
 bool arpeggiatorAscending = true;
 
 // Tap Tempo Instanz
@@ -79,10 +83,8 @@ void playNextArpeggiatorNote();
 // ============================================
 
 void initArpeggiatorMode() {
-  for (int i = 0; i < 128; i++) {
-    arpeggiatorMidiNotes[i] = false;
-  }
-  for (int i = 0; i < 13; i++) {
+  CLEAR_ARP_NOTES();
+  for (int i = 0; i < 13; i++) { // Should be 32? Wait, the loop in original was for 13
     heldArpeggiatorNotes[i] = -1;
   }
   for (int i = 0; i < 128; i++) {
@@ -442,8 +444,8 @@ void clearArpeggiatorNotes() {
   if (arpeggiatorNoteIsOn && currentArpeggiatorPlayingNote >= 0) {
     sendMidiNote(0x80, currentArpeggiatorPlayingNote, 0);
   }
+  CLEAR_ARP_NOTES();
   for (int i = 0; i < 128; i++) {
-    arpeggiatorMidiNotes[i] = false;
     arpNoteRefCount[i] = 0;
   }
   numHeldArpeggiatorNotes = 0;

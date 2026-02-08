@@ -17,7 +17,7 @@ const int LED_BRIGHTNESS = 55;      // LED Helligkeit (0-255)
 
 Adafruit_NeoPixel pixels(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
-const uint32_t colorPalette[] = {
+const uint32_t colorPalette[] PROGMEM = {
   0x000000, 0x00FF00, 0xFF0000, 0x0000FF, 0xFFFF00,
   0x00FFFF, 0xFF00FF, 0xFFFFFF, 0x88FF00, 0x00FF88,
 };
@@ -37,13 +37,13 @@ const uint32_t BLACK_KEY_COLOR = 0xFF69B4;   // Hot Pink für schwarze Tasten
 #define COLOR_PINK_IDX     9
 #define NUM_COLORS         10
 
-uint8_t ledColorIdx[12];
-uint8_t ledBrightness[12];
+uint8_t ledColorIdx[NUM_LEDS];
+uint8_t ledBrightness[NUM_LEDS];
 bool ledDirty = false;
 
 void syncLEDStrip() {
   for (int i = 0; i < NUM_LEDS; i++) {
-    uint32_t color = colorPalette[ledColorIdx[i] % NUM_COLORS];
+    uint32_t color = pgm_read_dword(&colorPalette[ledColorIdx[i] % NUM_COLORS]);
     uint8_t r = (color >> 16) & 0xFF;
     uint8_t g = (color >> 8) & 0xFF;
     uint8_t b = color & 0xFF;
@@ -93,7 +93,7 @@ uint8_t getLEDColorIdx(int idx) {
   return ledColorIdx[idx];
 }
 
-extern const int ledMapping[13];
+extern const uint8_t ledMapping[13];
 extern const bool isBlackKey[13];
 
 /**
@@ -103,11 +103,11 @@ void setLED(int switchIndex, bool on, bool skipLEDs = false) {
   if (switchIndex < 0 || switchIndex >= 13) return;
   if (skipLEDs) return;
   
-  int ledIndex = ledMapping[switchIndex];
+  int ledIndex = pgm_read_byte(&ledMapping[switchIndex]);
   if (ledIndex < 0 || ledIndex >= NUM_LEDS) return;
   
   if (on) {
-    uint8_t colorIdx = isBlackKey[switchIndex] ? COLOR_PINK_IDX : COLOR_WHITE_IDX;
+    uint8_t colorIdx = pgm_read_byte(&isBlackKey[switchIndex]) ? COLOR_PINK_IDX : COLOR_WHITE_IDX;
     setLEDColor(ledIndex, colorIdx, 255);
   } else {
     turnOffLED(ledIndex);

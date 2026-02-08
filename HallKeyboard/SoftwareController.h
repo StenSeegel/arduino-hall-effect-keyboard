@@ -54,9 +54,9 @@
 // SOFTWARE CONTROLLER STATE
 // ============================================
 
-int currentOctave = 3;
+int8_t currentOctave = 3;
 bool isIdle = true;
-int bpmPriorityBeats = 0;
+uint8_t bpmPriorityBeats = 0;
 extern unsigned long lastNoteActiveTime;
 
 // Modus-Aktivierungen
@@ -66,31 +66,33 @@ bool arpeggiatorActive = false;
 
 // Submenu-Navigation
 bool inSubmenu = false;
-int currentSubmenu = 0;
-int currentSubmenuPage = 0;
-int submenuIndex = 0;
-int maxSubmenuIndex = 0;
+int8_t currentSubmenu = 0;
+int8_t currentSubmenuPage = 0;
+int8_t submenuIndex = 0;
+int8_t maxSubmenuIndex = 0;
 bool submenuChanged = false;
 
 // Play Mode Variables
-int playModeType = PLAY_MODE_TOGGLE_HOLD_ADDITIVE;
+uint8_t playModeType = PLAY_MODE_TOGGLE_HOLD_ADDITIVE;
 bool holdMode = false;
 bool additiveMode = false;
-int heldNote = -1;
-int heldSwitchIdx = -1;
+int8_t heldNote = -1;
+int8_t heldSwitchIdx = -1;
 bool heldNotes[NUM_SWITCHES];
+uint8_t activeSwitchNotes[NUM_SWITCHES][5];
+uint8_t activeSwitchNumNotes[NUM_SWITCHES];
 
 // Chord Mode Variables
-extern int chordModeType;
-extern int scaleType;
-extern int diatonicRootKey;
-extern int chordExtensionType;
+extern int8_t chordModeType;
+extern int8_t scaleType;
+extern int8_t diatonicRootKey;
+extern uint8_t chordExtensionType;
 bool chordNotesActive[NUM_SWITCHES];
 
 // Arpeggiator Mode Variables
-extern int arpeggiatorMode;
-extern int arpeggiatorRate;
-extern int arpeggiatorDutyCycle;
+extern int8_t arpeggiatorMode;
+extern uint8_t arpeggiatorRate;
+extern uint8_t arpeggiatorDutyCycle;
 bool autoHoldActivatedByArp = false;
 bool savedAdditiveModeBeforeArp = false;
 bool savedPlayModeActiveBeforeArp = false;
@@ -103,10 +105,10 @@ extern bool arpWaitingForSync;
 uint8_t holdModeNoteRefCount[128];
 
 // Save/Restore Variables
-int savedArpeggiatorModeBeforeSubmenu = 0;
-int savedArpeggiatorRateBeforeSubmenu = 2; // Default RATE_EIGHTH
-int savedArpeggiatorDutyCycleBeforeSubmenu = 50;
-int savedOctaveBeforeSubmenu = 3;
+int8_t savedArpeggiatorModeBeforeSubmenu = 0;
+uint8_t savedArpeggiatorRateBeforeSubmenu = 2; // Default RATE_EIGHTH
+uint8_t savedArpeggiatorDutyCycleBeforeSubmenu = 50;
+int8_t savedOctaveBeforeSubmenu = 3;
 bool savedPlayModeActiveBeforeSubmenu = false;
 bool savedChordModeActiveBeforeSubmenu = false;
 bool savedArpeggiatorActiveBeforeSubmenu = false;
@@ -114,13 +116,13 @@ bool savedArpeggiatorActiveBeforeSubmenu = false;
 // ============================================
 // EXTERN GLOBALS (from HallKeyboard.ino / other headers)
 // ============================================
-extern int currentOctave;
+extern int8_t currentOctave;
 extern ArduinoTapTempo tapTempo;
 extern volatile bool midiClockActive;
 extern uint16_t calculatedBPM;
 extern void syncMidiClockPhase();
 extern void syncMidiClockToBPM();
-extern int bpmPriorityBeats;
+extern uint8_t bpmPriorityBeats;
 extern void sendMidiNote(int cmd, int pitch, int velocity);
 extern void setLED(int switchIndex, bool on, bool skipLEDs = false);
 extern void confirmLED(int switchIndex);
@@ -135,14 +137,17 @@ extern void clearArpeggiatorNotes();
 extern void transposeArpeggiatorNotes(int semiTones);
 extern uint8_t arpNoteRefCount[128];
 extern void clearChordMode();
-extern const int maxChordNotes;
-extern bool holdModeMidiNotes[128];
+extern const uint8_t maxChordNotes;
+extern uint8_t holdModeMidiNotes[16];
 extern bool isIdle;
 
-extern int currentArpeggiatorPlayingNote;
+#define IS_HOLD_NOTE_ACTIVE(n) ((holdModeMidiNotes[(n) >> 3] >> ((n) & 7)) & 1)
+#define SET_HOLD_NOTE_ACTIVE(n, v) if(v) holdModeMidiNotes[(n) >> 3] |= (1 << ((n) & 7)); else holdModeMidiNotes[(n) >> 3] &= ~(1 << ((n) & 7))
+
+extern int8_t currentArpeggiatorPlayingNote;
 extern bool arpeggiatorNoteIsOn;
-extern int numHeldArpeggiatorNotes;
-extern int currentArpeggiatorIndex;
+extern int8_t numHeldArpeggiatorNotes;
+extern int8_t currentArpeggiatorIndex;
 
 #define NUM_SCALE_TYPES 9
 #define NUM_ARPEGGIATOR_MODES 5
@@ -168,6 +173,7 @@ void initSoftwareController() {
   for (int i = 0; i < NUM_SWITCHES; i++) {
     heldNotes[i] = false;
     chordNotesActive[i] = false;
+    activeSwitchNumNotes[i] = 0;
   }
   for (int i = 0; i < 128; i++) {
     holdModeNoteRefCount[i] = 0;
@@ -189,9 +195,9 @@ void deactivatePlayMode() {
   // Wenn Play Mode aus, alle gehaltenen Noten sofort beenden
   for (int i = 0; i < 128; i++) {
     holdModeNoteRefCount[i] = 0;
-    if (holdModeMidiNotes[i]) {
+    if (IS_HOLD_NOTE_ACTIVE(i)) {
       sendMidiNote(0x90, i, 0x00);
-      holdModeMidiNotes[i] = false;
+      SET_HOLD_NOTE_ACTIVE(i, false);
       // BUG FIX: Wenn Hold deaktiviert wird, Noten auch aus Arp entfernen (falls sie nicht physikalisch gehalten werden)
       removeNoteFromArpeggiatorMode(i);
     }
@@ -202,6 +208,7 @@ void deactivatePlayMode() {
 
   for (int i = 0; i < NUM_SWITCHES; i++) {
     heldNotes[i] = false;
+    activeSwitchNumNotes[i] = 0;
     setLED(i, false);
   }
 
@@ -272,9 +279,9 @@ void toggleChordModeOnOff() {
     // Um sicher zu gehen, beenden wir alle gehaltenen Noten im Hold Mode
     for (int i = 0; i < 128; i++) {
        holdModeNoteRefCount[i] = 0;
-       if (holdModeMidiNotes[i]) {
+       if (IS_HOLD_NOTE_ACTIVE(i)) {
          sendMidiNote(0x90, i, 0x00);
-         holdModeMidiNotes[i] = false;
+         SET_HOLD_NOTE_ACTIVE(i, false);
          // Auch aus Arp entfernen
          removeNoteFromArpeggiatorMode(i);
        }
@@ -318,7 +325,7 @@ void toggleArpeggiatorOnOff() {
     // 1. Statische Hold-Noten stoppen, wenn sie gespielt werden
     if (holdMode) {
       for (int i = 0; i < 128; i++) {
-        if (holdModeMidiNotes[i]) {
+        if (IS_HOLD_NOTE_ACTIVE(i)) {
           sendMidiNote(0x90, i, 0x00);
         }
       }
@@ -328,7 +335,7 @@ void toggleArpeggiatorOnOff() {
     for (int i = 0; i < NUM_SWITCHES; i++) {
         if (heldNotes[i] || switch_held[i]) {
             // Berechne Noten (inkl. Chords)
-            int baseNote = midiNotes[i] + (currentOctave * 12);
+            int baseNote = pgm_read_byte(&midiNotes[i]) + (currentOctave * 12);
             if (chordModeActive && chordModeType != CHORD_MODE_OFF) {
                 bool isFolded = (chordModeType == CHORD_MODE_FOLDED);
                 for (int j = 0; j < maxChordNotes; j++) {
@@ -399,9 +406,9 @@ void toggleArpeggiatorOnOff() {
       // Auch alle gehaltenen Noten stoppen und RefCounts zurücksetzen
       for (int i = 0; i < 128; i++) {
         holdModeNoteRefCount[i] = 0;
-        if (holdModeMidiNotes[i]) {
+        if (IS_HOLD_NOTE_ACTIVE(i)) {
           sendMidiNote(0x90, i, 0x00);
-          holdModeMidiNotes[i] = false;
+          SET_HOLD_NOTE_ACTIVE(i, false);
         }
       }
     }
@@ -721,8 +728,8 @@ void handleFunctionSwitches() {
             // Auch Hold-Noten im Speicher löschen (damit der Arp wirklich leer ist)
             for (int n = 0; n < 128; n++) {
               holdModeNoteRefCount[n] = 0;
-              if (holdModeMidiNotes[n]) {
-                holdModeMidiNotes[n] = false;
+              if (IS_HOLD_NOTE_ACTIVE(n)) {
+                SET_HOLD_NOTE_ACTIVE(n, false);
               }
             }
             for (int s = 0; s < NUM_SWITCHES; s++) {
@@ -770,9 +777,11 @@ void processNoteSwitches() {
           // Keine spezielle Sperre für Arpeggiator oder Hold hier
         } else if (currentSubmenu == 1 || currentSubmenu == 3) {
           sendMidiNote(0x90, currentNote, 0x45);
+          activeSwitchNotes[i][0] = currentNote;
+          activeSwitchNumNotes[i] = 1;
           continue;
         } else if (currentSubmenu == 2) {
-          diatonicRootKey = midiNotes[i];
+          diatonicRootKey = pgm_read_byte(&midiNotes[i]);
           confirmLED(i);
           continue;
         }
@@ -787,7 +796,7 @@ void processNoteSwitches() {
       
       if (chordModeActive && chordModeType != CHORD_MODE_OFF) {
         bool isFolded = (chordModeType == CHORD_MODE_FOLDED);
-        int baseNote = midiNotes[i] + (currentOctave * 12);
+        int baseNote = pgm_read_byte(&midiNotes[i]) + (currentOctave * 12);
         numNotesToPlay = 0;
         for (int j = 0; j < maxChordNotes; j++) {
           int noteOffset = getChordNote(i, scaleType, j);
@@ -808,7 +817,7 @@ void processNoteSwitches() {
       
       // HOLD+ARP SPECIAL: Remove old switch notes (Nur im Mono-Hold)
       if (holdMode && arpeggiatorActive && !additiveMode && heldSwitchIdx != -1 && heldSwitchIdx != i) {
-        int oldBaseNote = midiNotes[heldSwitchIdx] + (currentOctave * 12);
+        int oldBaseNote = pgm_read_byte(&midiNotes[heldSwitchIdx]) + (currentOctave * 12);
         if (chordModeActive && chordModeType != CHORD_MODE_OFF) {
           bool isFoldedCheck = (chordModeType == CHORD_MODE_FOLDED);
           for (int j = 0; j < maxChordNotes; j++) {
@@ -832,17 +841,32 @@ void processNoteSwitches() {
       if (additiveMode) {
         heldNotes[i] = !heldNotes[i]; // Toggle
         isTriggeringNew = heldNotes[i];
+
+        if (isTriggeringNew) {
+          activeSwitchNumNotes[i] = numNotesToPlay;
+          for (int n = 0; n < numNotesToPlay; n++) {
+            activeSwitchNotes[i][n] = notesToPlay[n];
+          }
+        } else {
+          // Beim Toggle-Ausschalten im Additiven Hold: Nutze gespeicherte Noten
+          numNotesToPlay = activeSwitchNumNotes[i];
+          for (int n = 0; n < numNotesToPlay; n++) {
+            notesToPlay[n] = activeSwitchNotes[i][n];
+          }
+          activeSwitchNumNotes[i] = 0;
+        }
       } else {
         bool isSameSwitchDouble = (heldSwitchIdx == i);
         if (holdMode && !isSameSwitchDouble) {
           // Neuer Switch im Single Hold: Alle alten Noten aus!
           if (heldSwitchIdx != -1) {
             heldNotes[heldSwitchIdx] = false;
+            activeSwitchNumNotes[heldSwitchIdx] = 0; 
             for (int n = 0; n < 128; n++) {
               holdModeNoteRefCount[n] = 0;
-              if (holdModeMidiNotes[n]) {
+              if (IS_HOLD_NOTE_ACTIVE(n)) {
                 if (!arpeggiatorActive) sendMidiNote(0x90, n, 0x00);
-                holdModeMidiNotes[n] = false;
+                SET_HOLD_NOTE_ACTIVE(n, false);
                 removeNoteFromArpeggiatorMode(n);
               }
             }
@@ -850,21 +874,40 @@ void processNoteSwitches() {
           heldSwitchIdx = i;
           heldNotes[i] = true;
           isTriggeringNew = true;
+          
+          // Speichern für Single Hold (auch wenn wir hier den RefCount-Quickfix oben haben)
+          activeSwitchNumNotes[i] = numNotesToPlay;
+          for (int n = 0; n < numNotesToPlay; n++) {
+            activeSwitchNotes[i][n] = notesToPlay[n];
+          }
         } else if (holdMode && isSameSwitchDouble) {
           // Gleicher Switch nochmal: Alles aus!
           heldSwitchIdx = -1;
           heldNotes[i] = false;
+          
+          // Nutze gespeicherte Noten für das Ausschalten
+          numNotesToPlay = activeSwitchNumNotes[i];
+          for (int n = 0; n < numNotesToPlay; n++) {
+            notesToPlay[n] = activeSwitchNotes[i][n];
+          }
+          activeSwitchNumNotes[i] = 0;
+
           for (int n = 0; n < 128; n++) {
             holdModeNoteRefCount[n] = 0;
-            if (holdModeMidiNotes[n]) {
+            if (IS_HOLD_NOTE_ACTIVE(n)) {
               if (!arpeggiatorActive) sendMidiNote(0x90, n, 0x00);
-              holdModeMidiNotes[n] = false;
+              SET_HOLD_NOTE_ACTIVE(n, false);
               removeNoteFromArpeggiatorMode(n);
             }
           }
           isTriggeringNew = false;
         } else {
           isTriggeringNew = true;
+          // Normaler Modus (momentary): Speichern für Release
+          activeSwitchNumNotes[i] = numNotesToPlay;
+          for (int n = 0; n < numNotesToPlay; n++) {
+            activeSwitchNotes[i][n] = notesToPlay[n];
+          }
         }
       }
       
@@ -875,8 +918,8 @@ void processNoteSwitches() {
           if (additiveMode) {
             if (isTriggeringNew) {
               // Additive Hold: Turning switch ON
-              if (!holdModeMidiNotes[noteToPlay]) {
-                holdModeMidiNotes[noteToPlay] = true;
+              if (!IS_HOLD_NOTE_ACTIVE(noteToPlay)) {
+                SET_HOLD_NOTE_ACTIVE(noteToPlay, true);
                 if (!arpeggiatorActive) sendMidiNote(0x90, noteToPlay, 0x45);
               }
               if (holdModeNoteRefCount[noteToPlay] < 255) {
@@ -888,7 +931,7 @@ void processNoteSwitches() {
               if (holdModeNoteRefCount[noteToPlay] > 0) {
                 holdModeNoteRefCount[noteToPlay]--;
                 if (holdModeNoteRefCount[noteToPlay] == 0) {
-                  holdModeMidiNotes[noteToPlay] = false;
+                  SET_HOLD_NOTE_ACTIVE(noteToPlay, false);
                   if (!arpeggiatorActive) sendMidiNote(0x90, noteToPlay, 0x00);
                 }
               }
@@ -897,14 +940,14 @@ void processNoteSwitches() {
           } else {
             // Single Hold: Note aktivieren (Alte wurden oben bereits deaktiviert)
             if (isTriggeringNew) {
-              holdModeMidiNotes[noteToPlay] = true;
+              SET_HOLD_NOTE_ACTIVE(noteToPlay, true);
               if (!arpeggiatorActive) sendMidiNote(0x90, noteToPlay, 0x45);
               // RefCounts wurden oben beim loeschen der alten Noten bereits zurueckgesetzt
               holdModeNoteRefCount[noteToPlay] = 1;
               addNoteToArpeggiatorMode(noteToPlay);
             } else {
               // Single Hold Ausschalten (Gleiche Taste nochmal)
-              holdModeMidiNotes[noteToPlay] = false;
+              SET_HOLD_NOTE_ACTIVE(noteToPlay, false);
               if (!arpeggiatorActive) sendMidiNote(0x90, noteToPlay, 0x00);
               holdModeNoteRefCount[noteToPlay] = 0;
               removeNoteFromArpeggiatorMode(noteToPlay);
@@ -932,46 +975,20 @@ void processNoteSwitches() {
     
     if (switch_released[i]) {
       if (inSubmenu && (currentSubmenu == 1 || currentSubmenu == 3 || currentSubmenu == 4)) {
-        if (chordModeActive && chordModeType != CHORD_MODE_OFF) {
-          int baseNote = midiNotes[i] + (currentOctave * 12);
-          for (int j = 0; j < maxChordNotes; j++) {
-            int noteOffset = getChordNote(i, scaleType, j);
-            if (noteOffset >= 0) {
-              int chordNote = baseNote + noteOffset;
-              if (chordModeType == CHORD_MODE_FOLDED) {
-                while (chordNote > (currentOctave + 1) * 12) chordNote -= 12;
-                while (chordNote < currentOctave * 12) chordNote += 12;
-              }
-              sendMidiNote(0x90, chordNote, 0x00);
-            }
-          }
-        } else {
-          sendMidiNote(0x90, currentNote, 0x00);
+        // Beim Oktave-Wechsel oder Arp-Menue muessen wir auch die korrekt gespeicherten Noten stoppen
+        int numNotesToRelease = activeSwitchNumNotes[i];
+        for (int n = 0; n < numNotesToRelease; n++) {
+          sendMidiNote(0x90, activeSwitchNotes[i][n], 0x00);
         }
+        activeSwitchNumNotes[i] = 0;
       } else {
         int notesToRelease[5];
-        int numNotesToRelease = 1;
+        int numNotesToRelease = activeSwitchNumNotes[i]; // Nutze gespeicherte Noten
         
-        if (chordModeActive && chordModeType != CHORD_MODE_OFF) {
-          bool isFolded = (chordModeType == CHORD_MODE_FOLDED);
-          int baseNote = midiNotes[i] + (currentOctave * 12);
-          numNotesToRelease = 0;
-          for (int j = 0; j < maxChordNotes; j++) {
-            int noteOffset = getChordNote(i, scaleType, j);
-            if (noteOffset >= 0 && numNotesToRelease < 5) {
-              int chordNote = baseNote + noteOffset;
-              if (isFolded) {
-                while (chordNote > (currentOctave + 1) * 12) chordNote -= 12;
-                while (chordNote < currentOctave * 12) chordNote += 12;
-              }
-              notesToRelease[numNotesToRelease] = chordNote;
-              numNotesToRelease++;
-            }
-          }
-        } else {
-          notesToRelease[0] = currentNote;
-          numNotesToRelease = 1;
+        for (int n = 0; n < numNotesToRelease; n++) {
+          notesToRelease[n] = activeSwitchNotes[i][n];
         }
+        activeSwitchNumNotes[i] = 0; // Speicher leeren
         
         for (int noteIdx = 0; noteIdx < numNotesToRelease; noteIdx++) {
           int noteToRelease = notesToRelease[noteIdx];

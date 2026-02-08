@@ -25,16 +25,19 @@
 #define HOLD_MODE_ADDITIVE 1
 
 // Tracke welche Noten im Hold Mode gehalten werden
-bool holdModeMidiNotes[128];         // Welche MIDI-Noten sind von Hold Mode aktiv
-int lastHeldNote = -1;               // Letzte gehaltene Note (für Normal Mode)
+uint8_t holdModeMidiNotes[16];       
+int8_t lastHeldNote = -1;               // Letzte gehaltene Note (für Normal Mode)
+
+#define IS_HOLD_NOTE_ACTIVE(n) ((holdModeMidiNotes[(n) >> 3] >> ((n) & 7)) & 1)
+#define SET_HOLD_NOTE_ACTIVE(n, v) if(v) holdModeMidiNotes[(n) >> 3] |= (1 << ((n) & 7)); else holdModeMidiNotes[(n) >> 3] &= ~(1 << ((n) & 7))
 
 // ============================================
 // HOLD MODE FUNCTIONS
 // ============================================
 
 void initHoldMode() {
-  for (int i = 0; i < 128; i++) {
-    holdModeMidiNotes[i] = false;
+  for (int i = 0; i < 16; i++) {
+    holdModeMidiNotes[i] = 0;
   }
   lastHeldNote = -1;
 }
@@ -67,12 +70,12 @@ void updateHoldMode(int switchIndex, int midiNote, bool isPressed) {
     // ========================================
     if (isPressed) {
       // Toggle-Check: Wenn Note schon an, ausschalten
-      if (holdModeMidiNotes[midiNote]) {
-        holdModeMidiNotes[midiNote] = false;
+      if (IS_HOLD_NOTE_ACTIVE(midiNote)) {
+        SET_HOLD_NOTE_ACTIVE(midiNote, false);
         //Serial.print("Hold Note Off (Additive Toggle): ");
       } else {
         // Note anschalten
-        holdModeMidiNotes[midiNote] = true;
+        SET_HOLD_NOTE_ACTIVE(midiNote, true);
         //Serial.print("Hold Note On (Additive): ");
       }
     }
@@ -83,17 +86,17 @@ void updateHoldMode(int switchIndex, int midiNote, bool isPressed) {
     if (isPressed) {
       if (lastHeldNote == midiNote) {
         // Gleiche Note nochmal - ausschalten (toggle)
-        holdModeMidiNotes[midiNote] = false;
+        SET_HOLD_NOTE_ACTIVE(midiNote, false);
         lastHeldNote = -1;
         //Serial.print("Hold Note Off (Toggle): ");
       } else {
         // Neue Note - schalte alte aus, neue an
         if (lastHeldNote >= 0 && lastHeldNote < 128) {
-          holdModeMidiNotes[lastHeldNote] = false;
+          SET_HOLD_NOTE_ACTIVE(lastHeldNote, false);
           //Serial.print("Hold Note Off (Old): ");
         }
         
-        holdModeMidiNotes[midiNote] = true;
+        SET_HOLD_NOTE_ACTIVE(midiNote, true);
         lastHeldNote = midiNote;
       }
     }
@@ -106,7 +109,7 @@ void updateHoldMode(int switchIndex, int midiNote, bool isPressed) {
  * Gib Array von aktiven Hold Mode Noten
  * Diese werden an den MIDI Generator übergeben
  */
-bool* getHoldModeNotes() {
+uint8_t* getHoldModeNotes() {
   return holdModeMidiNotes;
 }
 
@@ -114,8 +117,8 @@ bool* getHoldModeNotes() {
  * Resets all held notes (z.B. wenn Hold Mode deaktiviert wird)
  */
 void clearHoldMode() {
-  for (int i = 0; i < 128; i++) {
-    holdModeMidiNotes[i] = false;
+  for (int i = 0; i < 16; i++) {
+    holdModeMidiNotes[i] = 0;
   }
   lastHeldNote = -1;
 }

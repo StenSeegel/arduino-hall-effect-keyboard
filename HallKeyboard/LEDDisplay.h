@@ -11,25 +11,27 @@
 #ifndef LED_DISPLAY_H
 #define LED_DISPLAY_H
 
-extern bool activeMidiNotes[128];
+extern uint8_t activeMidiNotes[16];
 extern bool playModeActive;
 extern bool additiveMode;
 extern bool chordModeActive;
 extern bool arpeggiatorActive;
-extern int arpeggiatorMode;
-extern int chordModeType;
-extern const int ledMapping[13];
-extern const int midiNotes[13];
-extern int currentOctave;
+extern int8_t arpeggiatorMode;
+extern int8_t chordModeType;
+extern const uint8_t ledMapping[13];
+extern const uint8_t midiNotes[13];
+extern int8_t currentOctave;
 extern bool inSubmenu;
-extern int currentSubmenu;
-extern int submenuIndex;
-extern int maxSubmenuIndex;
-extern int bpmPriorityBeats;
-extern int confirmationSwitchIndex;
+extern int8_t currentSubmenu;
+extern int8_t submenuIndex;
+extern int8_t maxSubmenuIndex;
+extern uint8_t bpmPriorityBeats;
+extern int8_t confirmationSwitchIndex;
 
-extern int numHeldArpeggiatorNotes;
-extern int heldArpeggiatorNotes[32];
+#define IS_NOTE_ACTIVE(n) ((activeMidiNotes[(n) >> 3] >> ((n) & 7)) & 1)
+
+extern int8_t numHeldArpeggiatorNotes;
+extern int8_t heldArpeggiatorNotes[32];
 
 // Track current display state to avoid redundant updates
 enum LEDDisplayState {
@@ -117,7 +119,7 @@ void updateLEDDisplay() {
   
   // 1. Check currently sounding MIDI notes
   for (int i = 0; i < 128; i++) {
-    if (activeMidiNotes[i]) {
+    if (IS_NOTE_ACTIVE(i)) {
       performanceActive = true;
       break;
     }
@@ -167,11 +169,11 @@ void updateLEDDisplay() {
 
       // 1. Check current physical keyboard range (Notes 0-12 relative to current octave)
       for (int i = 0; i < 13; i++) {
-        if (ledMapping[i] != led) continue;
+        if (pgm_read_byte(&ledMapping[i]) != led) continue;
 
-        int midiNoteOnKeyboard = midiNotes[i] + keyboardMin;
+        int midiNoteOnKeyboard = pgm_read_byte(&midiNotes[i]) + keyboardMin;
 
-        if (activeMidiNotes[midiNoteOnKeyboard]) {
+        if (IS_NOTE_ACTIVE(midiNoteOnKeyboard)) {
           noteInOctavePlaying = true;
           if (multiNotesPerLED[led].count < 5) {
             int idx = multiNotesPerLED[led].count;
@@ -210,7 +212,7 @@ void updateLEDDisplay() {
       for (int note = 0; note < 128; note++) {
         if (note >= keyboardMin && note <= keyboardMax) continue; // Skip physical range
         
-        bool isNoteActive = activeMidiNotes[note];
+        bool isNoteActive = IS_NOTE_ACTIVE(note);
         bool isNoteInArp = false;
         if (arpeggiatorActive) {
           for (int k = 0; k < numHeldArpeggiatorNotes; k++) {
@@ -225,7 +227,7 @@ void updateLEDDisplay() {
           // Does this out-of-range pitch share a pitch class with any key mapped to THIS led?
           int pitchClass = note % 12;
           for (int i = 0; i < 13; i++) {
-            if (ledMapping[i] == led && (midiNotes[i] % 12) == pitchClass) {
+            if (pgm_read_byte(&ledMapping[i]) == led && (pgm_read_byte(&midiNotes[i]) % 12) == pitchClass) {
               if (isNoteActive) noteOutOctavePlaying = true;
               if (isNoteInArp) noteOutOctaveArp = true;
               
