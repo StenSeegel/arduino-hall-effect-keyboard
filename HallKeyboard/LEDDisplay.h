@@ -29,7 +29,7 @@ extern int bpmPriorityBeats;
 extern int confirmationSwitchIndex;
 
 extern int numHeldArpeggiatorNotes;
-extern int heldArpeggiatorNotes[13];
+extern int heldArpeggiatorNotes[32];
 
 // Track current display state to avoid redundant updates
 enum LEDDisplayState {

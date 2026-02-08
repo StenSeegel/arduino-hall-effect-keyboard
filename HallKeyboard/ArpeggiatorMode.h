@@ -41,7 +41,7 @@ float lastArpeggiatorRawProgress = 0;
 int lastArpeggiatorSyncPulse = -1; // Neu: Für präzisen MIDI Clock Sync
 bool arpWaitingForSync = false;    // Ob der ARP auf den nächsten Downbeat wartet
 
-int heldArpeggiatorNotes[13];
+int heldArpeggiatorNotes[32];
 int numHeldArpeggiatorNotes = 0;
 uint8_t arpNoteRefCount[128];
 int currentArpeggiatorIndex = 0;
@@ -57,8 +57,8 @@ extern bool arpeggiatorActive;
 extern void sendMidiNote(int cmd, int pitch, int velocity);
 
 // MIDI Clock Sync
-extern uint16_t masterPulseCounter;
-extern bool midiClockRunning;
+extern volatile uint16_t masterPulseCounter;
+extern volatile bool midiClockRunning;
 
 // Konstanten
 #ifndef ARPEGGIATOR_UP_DOWN
@@ -246,7 +246,7 @@ void playNextArpeggiatorNote() {
   }
   
   // Lokale Kopie für Sortierung und Zugriff
-  int activeNotes[13];
+  int activeNotes[32];
   int count = numHeldArpeggiatorNotes;
   for (int i = 0; i < count; i++) {
     activeNotes[i] = heldArpeggiatorNotes[i];
@@ -358,19 +358,13 @@ void playNextArpeggiatorNote() {
 
 /**
  * Füge eine Note zur Arpeggiator-Sequenz hinzu
+ * - Fügt Note IMMER hinzu (erlaubt Duplikate für Folded Chords)
+ * - Reference Count trackt wie oft die Tonhöhe insgesamt aktiv ist
  */
 void addNoteToArpeggiatorMode(int note) {
   if (note < 0 || note >= 128) return;
   
-  // Increment Reference Count
-  arpNoteRefCount[note]++;
-  
-  // Check if note is already in the list
-  if (arpNoteRefCount[note] > 1) {
-    return; // Already present
-  }
-  
-  if (numHeldArpeggiatorNotes >= 13) return;
+  if (numHeldArpeggiatorNotes >= 32) return; // Erhöhtes Limit auf 32 Noten (z.B. 6x Additive Chord)
   
   // Wenn das die erste Note ist, setzen wir den Index so zurück,
   // dass beim nächsten Beat-Trigger die erste Note (Index 0) spielt.
@@ -381,42 +375,31 @@ void addNoteToArpeggiatorMode(int note) {
   // Füge Note hinzu
   heldArpeggiatorNotes[numHeldArpeggiatorNotes] = note;
   numHeldArpeggiatorNotes++;
-}
-
-/**
- * Transponiert alle aktuell im Arpeggiator gespeicherten Noten
- */
-void transposeArpeggiatorNotes(int semiTones) {
-  for (int i = 0; i < numHeldArpeggiatorNotes; i++) {
-    int newNote = heldArpeggiatorNotes[i] + semiTones;
-    if (newNote >= 0 && newNote < 128) {
-      heldArpeggiatorNotes[i] = newNote;
-    }
-  }
+  
+  // Increment Reference Count (für Mapping-Logik)
+  arpNoteRefCount[note]++;
 }
 
 /**
  * Entferne eine Note aus der Arpeggiator-Sequenz
+ * - Entfernt genau EINE Instanz dieser Tonhöhe aus dem held-Array
  */
 void removeNoteFromArpeggiatorMode(int note) {
   if (note < 0 || note >= 128) return;
   
-  if (arpNoteRefCount[note] > 0) {
-    arpNoteRefCount[note]--;
-  }
-  
-  // Nur entfernen wenn RefCount 0
-  if (arpNoteRefCount[note] > 0) {
-    return;
-  }
-  
+  // Finde die Note im Array und entferne sie
   for (int i = 0; i < numHeldArpeggiatorNotes; i++) {
     if (heldArpeggiatorNotes[i] == note) {
-      // Verschiebe alle Noten nach vorne
+      // Eine Instanz gefunden - entferne sie durch Verschieben
       for (int j = i; j < numHeldArpeggiatorNotes - 1; j++) {
         heldArpeggiatorNotes[j] = heldArpeggiatorNotes[j + 1];
       }
       numHeldArpeggiatorNotes--;
+      
+      // Update Reference Count
+      if (arpNoteRefCount[note] > 0) {
+        arpNoteRefCount[note]--;
+      }
       
       // Wenn keine Noten mehr, schalte aktuelle Note aus
       if (numHeldArpeggiatorNotes == 0 && currentArpeggiatorPlayingNote >= 0 && currentArpeggiatorPlayingNote < 128) {
@@ -428,7 +411,19 @@ void removeNoteFromArpeggiatorMode(int note) {
       if (currentArpeggiatorIndex >= numHeldArpeggiatorNotes && numHeldArpeggiatorNotes > 0) {
         currentArpeggiatorIndex = numHeldArpeggiatorNotes - 1;
       }
-      return;
+      return; // Erfolg: Eine Instanz wurde entfernt
+    }
+  }
+}
+
+/**
+ * Transponiert alle aktuell im Arpeggiator gespeicherten Noten
+ */
+void transposeArpeggiatorNotes(int semiTones) {
+  for (int i = 0; i < numHeldArpeggiatorNotes; i++) {
+    int newNote = heldArpeggiatorNotes[i] + semiTones;
+    if (newNote >= 0 && newNote < 128) {
+      heldArpeggiatorNotes[i] = newNote;
     }
   }
 }
