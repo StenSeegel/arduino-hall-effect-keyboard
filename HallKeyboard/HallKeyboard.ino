@@ -62,6 +62,11 @@
 // ============================================
 #include "LEDAnimator.h"
 
+// ============================================
+// INCLUDE SETTINGS MANAGER (EEPROM Persistence)
+// ============================================
+#include "SettingsManager.h"
+
 
 void setup() {
   // Initialize Serial
@@ -77,6 +82,9 @@ void setup() {
   initChordMode();
   initArpeggiatorMode();
   initMidiGenerator();
+  
+  // Lade Einstellungen aus EEPROM (überschreibt Defaults falls vorhanden)
+  loadSettingsFromEEPROM();
   
   // Killall MIDI: Sicherstellen, dass keine Noten hängen (Bootup Panic)
   killAllMidiNotes();

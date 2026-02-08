@@ -22,6 +22,8 @@
 #include "HardwareController.h"
 #include "ArduinoTapTempo.h"
 
+void saveSettingsToEEPROM(); // Forward Declaration
+
 // Play Mode Konstanten (Toggle-Modi für FS1)
 #define PLAY_MODE_TOGGLE_HOLD_ADDITIVE 0
 #define PLAY_MODE_TOGGLE_OFF_HOLD 1
@@ -557,6 +559,7 @@ void exitSubmenu(bool saveChanges) {
         }
         break;
     }
+    saveSettingsToEEPROM(); 
   } else {
     // Falls der Modus erst beim Öffnen des Submenüs aktiviert wurde, beim Abbrechen wieder deaktivieren
     if (currentSubmenu == 1 && playModeActive != savedPlayModeActiveBeforeSubmenu) {
