@@ -10,7 +10,7 @@
 #include "ArduinoTapTempo.h"
 
 extern Adafruit_NeoPixel pixels;
-extern bool midiClockActive; // From MidiClockReceiver
+extern volatile bool midiClockActive; // From MidiClockReceiver
 
 // ============================================
 // LED ANIMATOR STATE

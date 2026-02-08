@@ -116,7 +116,7 @@ bool savedArpeggiatorActiveBeforeSubmenu = false;
 // ============================================
 extern int currentOctave;
 extern ArduinoTapTempo tapTempo;
-extern bool midiClockActive;
+extern volatile bool midiClockActive;
 extern uint16_t calculatedBPM;
 extern void syncMidiClockPhase();
 extern void syncMidiClockToBPM();
@@ -671,8 +671,8 @@ void handleShortPress(int fsNumber) {
           
           // Setze die globale Master-Phase so, dass der DOWN-Event exakt die "1" war.
           // Wir addieren pulsesSinceDown, da wir jetzt "pulsesSinceDown" nach der 1 sind.
-          extern uint16_t masterPulseCounter;
-          extern uint16_t ppqnCounter;
+          extern volatile uint16_t masterPulseCounter;
+          extern volatile uint16_t ppqnCounter;
           masterPulseCounter = pulsesSinceDown % 96;
           ppqnCounter = pulsesSinceDown % 24;
 

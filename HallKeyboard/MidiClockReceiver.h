@@ -34,7 +34,7 @@ extern void resetArpeggiatorPhase();
 // MIDI CLOCK RECEIVER STATE
 // ============================================
 
-bool midiClockActive = false;
+volatile bool midiClockActive = false;
 unsigned long lastMidiClockMicros = 0;
 uint16_t calculatedBPM = 120; // uint16_t statt float spart 2 bytes
 

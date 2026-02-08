@@ -21,11 +21,11 @@
 // MIDI CLOCK STATE
 // ============================================
 
-unsigned long lastClockMicros = 0;
-unsigned long clockIntervalMicros = 20833; // Default: 120 BPM (20.833 µs pro Pulse)
-uint16_t ppqnCounter = 0;
-uint16_t masterPulseCounter = 0; // 0-95 (für 4 Beats Synchronisation)
-bool midiClockRunning = false;
+volatile unsigned long lastClockMicros = 0;
+unsigned long clockIntervalMicros = 20833; // Default: 120 BPM
+volatile uint16_t ppqnCounter = 0;
+volatile uint16_t masterPulseCounter = 0; // 0-95 (für 4 Beats Synchronisation)
+volatile bool midiClockRunning = false;
 
 // Konfiguration für Arpeggiator-Synchronisation
 bool stopClockOnArpDeactivate = true; // Ob MIDI STOP gesendet werden soll, wenn ARP stoppt
@@ -36,7 +36,7 @@ bool stopClockOnArpDeactivate = true; // Ob MIDI STOP gesendet werden soll, wenn
 extern ArduinoTapTempo tapTempo;
 
 // Extern from MidiClockReceiver
-extern bool midiClockActive;
+extern volatile bool midiClockActive;
 extern uint16_t calculatedBPM;
 
 // ============================================
@@ -53,9 +53,38 @@ extern uint16_t calculatedBPM;
 // ============================================
 
 /**
- * Initialisiert den Clock Generator
+ * ISR für Timer 1 (MIDI Clock Pulse)
+ * Hier wird der eigentliche MIDI Pulse gesendet.
+ * Durch die ISR hat die Clock Vorrang vor der LED-Logik.
+ */
+ISR(TIMER1_COMPA_vect) {
+  if (midiClockRunning && !midiClockActive) {
+    Serial1.write(MIDI_CLOCK);
+    ppqnCounter = (ppqnCounter + 1) % PPQN_VALUE;
+    masterPulseCounter = (masterPulseCounter + 1) % 96; // 4 Beats a 24 PPQN
+    lastClockMicros = micros();
+  }
+}
+
+/**
+ * Initialisiert den Clock Generator (Timer 1 Setup)
  */
 void initMidiClockGenerator() {
+  cli();
+  TCCR1A = 0;
+  TCCR1B = 0;
+  TCNT1  = 0;
+  
+  // Startwert: 120 BPM
+  // 16MHz / 64 prescaler = 250kHz
+  // OCR1A = 625000 / 120 = 5208
+  OCR1A = 5208;
+  
+  TCCR1B |= (1 << WGM12);               // CTC Mode
+  TCCR1B |= (1 << CS11) | (1 << CS10);  // Prescaler 64
+  TIMSK1 |= (1 << OCIE1A);              // Enable Compare A Interrupt
+  sei();
+
   lastClockMicros = micros();
   ppqnCounter = 0;
   midiClockRunning = false;
@@ -63,25 +92,28 @@ void initMidiClockGenerator() {
 
 /**
  * Berechne Clock-Intervall basierend auf aktuellem BPM
- * Formel: Mikrosekunden pro Viertelnote / 24 Pulses
- * Priorisiert MIDI Clock Input über TapTempo
+ * Passt den Timer-Compare-Wert (OCR1A) an.
  */
 void updateClockInterval() {
   float bpm;
   
-  // Wähle BPM Quelle: MIDI Clock hat Vorrang
   if (midiClockActive) {
-    bpm = calculatedBPM; // Von MIDI Clock Receiver
-    // Serial.print("MIDI Clock BPM: ");
+    bpm = calculatedBPM;
   } else {
-    bpm = tapTempo.getBPM(); // Von internem TapTempo
-    // Serial.print("TapTempo BPM: ");
+    bpm = tapTempo.getBPM();
   }
   
-  if (bpm <= 0) bpm = 120.0; // Sicherheitsnetz
-  clockIntervalMicros = (60000000.0 / bpm) / PPQN_VALUE;
+  if (bpm <= 0.0) bpm = 120.0;
   
-  // Serial.println(bpm);
+  // Timer-Ticks berechnen (16MHz / 64 = 250kHz)
+  // Ticks = 250000 / (bpm * 24 / 60) = 625000 / bpm
+  uint16_t ticks = (uint16_t)(625000.0 / bpm);
+  
+  cli();
+  OCR1A = ticks;
+  sei();
+  
+  clockIntervalMicros = (60000000.0 / bpm) / PPQN_VALUE;
 }
 
 /**
@@ -131,6 +163,7 @@ void handleExternalClockPulse() {
   
   // Setze den internen Timer zurück, damit der hausinterne Generator
   // nicht im Konflikt mit dem externen Takt eigene Pulse sendet.
+  TCNT1 = 0; 
   lastClockMicros = micros();
 }
 
@@ -143,45 +176,10 @@ void syncMidiClockToBPM() {
   // Phase zurücksetzen bei manuellem Tap (Downbeat Sync)
   ppqnCounter = 0;
   masterPulseCounter = 0;
+  TCNT1 = 0;
   lastClockMicros = micros();
   // Optional: MIDI Start senden um Downbeat zu markieren
   Serial1.write(MIDI_START);
-}
-
-/**
- * Haupt-Update-Funktion - rufe in loop() auf
- * Sendet MIDI Clock Pulse (0xF8) alle clockIntervalMicros
- */
-void updateMidiClockGenerator() {
-  // Wenn externe Clock aktiv ist, pausieren wir den internen Timer-basierten Generator,
-  // da wir stattdessen über handleExternalClockPulse() synchronisiert werden.
-  if (!midiClockRunning || midiClockActive) return; 
-  
-  unsigned long currentMicros = micros();
-  
-  // Prüfe ob genug Zeit vergangen ist für nächsten Pulse
-  // Berücksichtigt Überlauf von micros() automatisch durch unsigned subtraction
-  if (currentMicros - lastClockMicros >= clockIntervalMicros) {
-    
-    // Sende MIDI Clock Pulse
-    Serial1.write(MIDI_CLOCK);
-    
-    // Update Counter
-    ppqnCounter = (ppqnCounter + 1) % PPQN_VALUE;
-    masterPulseCounter = (masterPulseCounter + 1) % 96; // 4 Beats a 24 PPQN
-    
-    // Setze nächsten Zeitpunkt (addiere Intervall statt currentMicros zu setzen, 
-    // um Drift durch Prozesszeit zu vermeiden)
-    lastClockMicros += clockIntervalMicros;
-
-    // Optionaler Debug Output (jeden Beat)
-    if (ppqnCounter == 0) {
-      // Serial.print("MIDI Clock Beat | PPQN: ");
-      // Serial.print(ppqnCounter);
-      // Serial.print(" | BPM: ");
-      // Serial.println(tapTempo.getBPM());
-    }
-  }
 }
 
 #endif

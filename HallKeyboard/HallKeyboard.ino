@@ -162,9 +162,6 @@ void loop() {
   // Update MIDI Generator - Koordiniere alle aktiven Modi (von MidiGenerator.h)
   updateMidiGenerator();
   
-  // Update MIDI Clock Generator (24 PPQN Output)
-  updateMidiClockGenerator();
-  
   // ============================================
   // UPDATE LED LAYERS
   // ============================================
