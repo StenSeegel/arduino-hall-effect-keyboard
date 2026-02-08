@@ -22,9 +22,10 @@
 #include "HardwareController.h"
 #include "ArduinoTapTempo.h"
 
-// Play Mode Konstanten
-#define PLAY_MODE_HOLD 0
-#define PLAY_MODE_ADDITIVE 1
+// Play Mode Konstanten (Toggle-Modi für FS1)
+#define PLAY_MODE_TOGGLE_HOLD_ADDITIVE 0
+#define PLAY_MODE_TOGGLE_OFF_HOLD 1
+#define PLAY_MODE_TOGGLE_OFF_ADDITIVE 2
 
 // Chord Mode Konstanten
 #define CHORD_MODE_OFF 0
@@ -72,7 +73,7 @@ int maxSubmenuIndex = 0;
 bool submenuChanged = false;
 
 // Play Mode Variables
-int playModeType = 0;
+int playModeType = PLAY_MODE_TOGGLE_HOLD_ADDITIVE;
 bool holdMode = false;
 bool additiveMode = false;
 int heldNote = -1;
@@ -83,6 +84,7 @@ bool heldNotes[NUM_SWITCHES];
 extern int chordModeType;
 extern int scaleType;
 extern int diatonicRootKey;
+extern int chordExtensionType;
 bool chordNotesActive[NUM_SWITCHES];
 
 // Arpeggiator Mode Variables
@@ -90,7 +92,7 @@ extern int arpeggiatorMode;
 extern int arpeggiatorRate;
 extern int arpeggiatorDutyCycle;
 bool autoHoldActivatedByArp = false;
-int savedPlayModeTypeBeforeArp = 0;
+bool savedAdditiveModeBeforeArp = false;
 bool savedPlayModeActiveBeforeArp = false;
 
 // Forward Declarations für Arpeggiator Synchronisation
@@ -151,13 +153,18 @@ extern int currentArpeggiatorIndex;
 // ============================================
 
 void initSoftwareController() {
-  playModeActive = false;
+  playModeType = PLAY_MODE_TOGGLE_HOLD_ADDITIVE;
+  playModeActive = true;
   chordModeActive = false;
   arpeggiatorActive = false;
   inSubmenu = false;
   currentSubmenu = 0;
   isIdle = true;
   currentOctave = 3;
+  holdMode = true;
+  additiveMode = false;
+  heldNote = -1;
+  heldSwitchIdx = -1;
   
   for (int i = 0; i < NUM_SWITCHES; i++) {
     heldNotes[i] = false;
@@ -175,51 +182,82 @@ void togglePlayModeOnOff();
 void toggleChordModeOnOff();
 void toggleArpeggiatorOnOff();
 
-// Toggle Play Mode Ein/Aus
-void togglePlayModeOnOff() {
-  if (arpeggiatorActive) {
-    // Im Arp Modus: IMMER aktiv, Toggled zwischen hold / latch und hold additive!
-    playModeType = (playModeType == PLAY_MODE_HOLD) ? PLAY_MODE_ADDITIVE : PLAY_MODE_HOLD;
-    playModeActive = true;
-    holdMode = true;
-    additiveMode = (playModeType == PLAY_MODE_ADDITIVE);
-    
-    autoHoldActivatedByArp = false; // Manuelle Änderung überschreibt Automatik
-    return;
+// Play Mode sicher deaktivieren (inkl. Cleanup)
+void deactivatePlayMode() {
+  playModeActive = false;
+  autoHoldActivatedByArp = false; // Manuelle Änderung überschreibt Automatik
+
+  // Wenn Play Mode aus, alle gehaltenen Noten sofort beenden
+  for (int i = 0; i < 128; i++) {
+    holdModeNoteRefCount[i] = 0;
+    if (holdModeMidiNotes[i]) {
+      sendMidiNote(0x90, i, 0x00);
+      holdModeMidiNotes[i] = false;
+      // BUG FIX: Wenn Hold deaktiviert wird, Noten auch aus Arp entfernen (falls sie nicht physikalisch gehalten werden)
+      removeNoteFromArpeggiatorMode(i);
+    }
   }
 
-  playModeActive = !playModeActive;
-  autoHoldActivatedByArp = false; // Manuelle Änderung überschreibt Automatik
-  
-  if (!playModeActive) {
-    // Wenn Play Mode aus, alle gehaltenen Noten sofort beenden
-    for (int i = 0; i < 128; i++) {
-      holdModeNoteRefCount[i] = 0;
-      if (holdModeMidiNotes[i]) {
-        sendMidiNote(0x90, i, 0x00);
-        holdModeMidiNotes[i] = false;
-        // BUG FIX: Wenn Hold deaktiviert wird, Noten auch aus Arp entfernen (falls sie nicht physikalisch gehalten werden)
-        removeNoteFromArpeggiatorMode(i); 
-      }
-    }
-    
-    heldNote = -1;
-    heldSwitchIdx = -1;
-    
-    for (int i = 0; i < NUM_SWITCHES; i++) {
-      heldNotes[i] = false;
-      setLED(i, false);
-    }
-    holdMode = false;
-    additiveMode = false;
-  } else {
-    holdMode = (playModeType == PLAY_MODE_HOLD || playModeType == PLAY_MODE_ADDITIVE);
-    additiveMode = (playModeType == PLAY_MODE_ADDITIVE);
+  heldNote = -1;
+  heldSwitchIdx = -1;
+
+  for (int i = 0; i < NUM_SWITCHES; i++) {
+    heldNotes[i] = false;
+    setLED(i, false);
   }
-  
-  //Serial.print("Play Mode: ");
-  //Serial.println(playModeActive ? "EIN" : "AUS");
-  
+
+  holdMode = false;
+  additiveMode = false;
+}
+
+// Toggle Play Mode Ein/Aus (neuer Standard)
+void togglePlayModeOnOff() {
+  autoHoldActivatedByArp = false; // Manuelle Änderung überschreibt Automatik
+
+  switch (playModeType) {
+    case PLAY_MODE_TOGGLE_HOLD_ADDITIVE:
+      if (!playModeActive) {
+        playModeActive = true;
+        holdMode = true;
+        additiveMode = false;
+      } else {
+        holdMode = true;
+        additiveMode = !additiveMode; // HOLD <-> ADDITIVE HOLD
+      }
+      break;
+
+    case PLAY_MODE_TOGGLE_OFF_HOLD:
+      if (playModeActive) {
+        deactivatePlayMode();
+      } else {
+        playModeActive = true;
+        holdMode = true;
+        additiveMode = false;
+      }
+      break;
+
+    case PLAY_MODE_TOGGLE_OFF_ADDITIVE:
+      if (playModeActive) {
+        deactivatePlayMode();
+      } else {
+        playModeActive = true;
+        holdMode = true;
+        additiveMode = true;
+      }
+      break;
+
+    default:
+      // Fallback: HOLD <-> ADDITIVE HOLD
+      if (!playModeActive) {
+        playModeActive = true;
+        holdMode = true;
+        additiveMode = false;
+      } else {
+        holdMode = true;
+        additiveMode = !additiveMode;
+      }
+      break;
+  }
 }
 
 // Toggle Chord Mode Ein/Aus
@@ -317,16 +355,17 @@ void toggleArpeggiatorOnOff() {
     if (!playModeActive) {
       // Speichere Vorzustand
       savedPlayModeActiveBeforeArp = playModeActive;
-      savedPlayModeTypeBeforeArp = playModeType;
-      
+      savedAdditiveModeBeforeArp = additiveMode;
+
       playModeActive = true;
       // Bei Sequence Mode erzwingen wir Additive, sonst Latch (Hold)
       if (arpeggiatorMode == ARPEGGIATOR_SEQUENCE) {
-        playModeType = PLAY_MODE_ADDITIVE;
+        additiveMode = true;
+      } else {
+        additiveMode = false;
       }
-      
+
       holdMode = true;
-      additiveMode = (playModeType == PLAY_MODE_ADDITIVE);
       autoHoldActivatedByArp = true;
     }
   } else {
@@ -343,14 +382,16 @@ void toggleArpeggiatorOnOff() {
     // Wenn Auto-Hold durch Arp aktiviert wurde, jetzt wieder ausschalten
     if (autoHoldActivatedByArp) {
       playModeActive = savedPlayModeActiveBeforeArp;
-      playModeType = savedPlayModeTypeBeforeArp;
-      
-      // Berechne hold/additive states neu basierend auf dem alten Typ
-      holdMode = (playModeActive && (playModeType == PLAY_MODE_HOLD || playModeType == PLAY_MODE_ADDITIVE));
-      additiveMode = (playModeActive && playModeType == PLAY_MODE_ADDITIVE);
-      
+      additiveMode = savedAdditiveModeBeforeArp;
+
+      // Berechne hold/additive states neu basierend auf dem alten Zustand
+      holdMode = playModeActive;
+      if (!playModeActive) {
+        additiveMode = false;
+      }
+
       autoHoldActivatedByArp = false;
-      
+
       // LEDs aufräumen
       for (int i = 0; i < NUM_SWITCHES; i++) {
         heldNotes[i] = false;
@@ -401,16 +442,19 @@ void enterSubmenuPage(int submenuNumber, int page) {
   
   switch(submenuNumber) {
     case 1:
-      maxSubmenuIndex = 2;
+      maxSubmenuIndex = 3;
       submenuIndex = playModeType;
       break;
     case 2:
       if (page == 0) {
         maxSubmenuIndex = NUM_SCALE_TYPES;
         submenuIndex = scaleType;
-      } else {
+      } else if (page == 1) {
         maxSubmenuIndex = 2; // Extended, Folded
         submenuIndex = (chordModeType == CHORD_MODE_FOLDED) ? 1 : 0;
+      } else {
+        maxSubmenuIndex = 3; // Triad, 7th, 7th+8th
+        submenuIndex = chordExtensionType;
       }
       break;
     case 3:
@@ -460,8 +504,15 @@ void exitSubmenu(bool saveChanges) {
           playModeType = submenuIndex;
           autoHoldActivatedByArp = false; // Manuelle Änderung überschreibt Automatik
           if (playModeActive) {
-            holdMode = (playModeType == PLAY_MODE_HOLD || playModeType == PLAY_MODE_ADDITIVE);
-            additiveMode = (playModeType == PLAY_MODE_ADDITIVE);
+            holdMode = true;
+            if (playModeType == PLAY_MODE_TOGGLE_OFF_HOLD) {
+              additiveMode = false;
+            } else if (playModeType == PLAY_MODE_TOGGLE_OFF_ADDITIVE) {
+              additiveMode = true;
+            }
+          } else {
+            holdMode = false;
+            additiveMode = false;
           }
         }
         break;
@@ -470,8 +521,10 @@ void exitSubmenu(bool saveChanges) {
           if (submenuIndex != scaleType) {
             scaleType = submenuIndex;
           }
-        } else {
+        } else if (currentSubmenuPage == 1) {
           chordModeType = (submenuIndex == 1) ? CHORD_MODE_FOLDED : CHORD_MODE_EXTENDED;
+        } else if (currentSubmenuPage == 2) {
+          chordExtensionType = submenuIndex;
         }
         break;
       case 3:
@@ -482,7 +535,7 @@ void exitSubmenu(bool saveChanges) {
             
             // Sequence Mode Sonderfall: Aktiviere Additive (Hold ist eh an)
             if (arpeggiatorActive && arpeggiatorMode == ARPEGGIATOR_SEQUENCE) {
-                playModeType = PLAY_MODE_ADDITIVE;
+                playModeActive = true;
                 holdMode = true;
                 additiveMode = true;
             }
@@ -656,7 +709,7 @@ void handleFunctionSwitches() {
           // Innerhalb eines Submenüs: FS4 (Index 3) blättert Seiten um
           if (i == 3) {
             int numPages = 1; // Default: 1 Seite (0)
-            if (currentSubmenu == 2) numPages = 2;
+            if (currentSubmenu == 2) numPages = 3;
             if (currentSubmenu == 3) numPages = 3;
             
             currentSubmenuPage = (currentSubmenuPage + 1) % numPages;
@@ -733,7 +786,7 @@ void processNoteSwitches() {
       setLED(i, true);
       
       // Calculate notes to play
-      int notesToPlay[3];
+      int notesToPlay[5];
       int numNotesToPlay = 1;
       
       if (chordModeActive && chordModeType != CHORD_MODE_OFF) {
@@ -742,7 +795,7 @@ void processNoteSwitches() {
         numNotesToPlay = 0;
         for (int j = 0; j < maxChordNotes; j++) {
           int noteOffset = getChordNote(i, scaleType, j);
-          if (noteOffset >= 0 && numNotesToPlay < 3) {
+          if (noteOffset >= 0 && numNotesToPlay < 5) {
             int chordNote = baseNote + noteOffset;
             if (isFolded) {
               while (chordNote > (currentOctave + 1) * 12) chordNote -= 12;
@@ -900,7 +953,7 @@ void processNoteSwitches() {
           sendMidiNote(0x90, currentNote, 0x00);
         }
       } else {
-        int notesToRelease[3];
+        int notesToRelease[5];
         int numNotesToRelease = 1;
         
         if (chordModeActive && chordModeType != CHORD_MODE_OFF) {
@@ -909,7 +962,7 @@ void processNoteSwitches() {
           numNotesToRelease = 0;
           for (int j = 0; j < maxChordNotes; j++) {
             int noteOffset = getChordNote(i, scaleType, j);
-            if (noteOffset >= 0 && numNotesToRelease < 3) {
+            if (noteOffset >= 0 && numNotesToRelease < 5) {
               int chordNote = baseNote + noteOffset;
               if (isFolded) {
                 while (chordNote > (currentOctave + 1) * 12) chordNote -= 12;

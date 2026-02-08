@@ -105,7 +105,7 @@ void setup() {
   updateClockInterval(); // Berechnet Intervall für 120 BPM
   startMidiClock();       // Startet den Output
   
-  Serial.println("System Initialized");
+  //Serial.println("System Initialized");
 }
 
 void loop() {

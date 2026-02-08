@@ -33,6 +33,11 @@ extern bool chordModeMidiNotes[128];
 #define CHORD_MODE_EXTENDED 1
 #define CHORD_MODE_FOLDED 2
 
+// Chord Extension Types
+#define CHORD_EXT_TRIAD 0
+#define CHORD_EXT_7TH 1
+#define CHORD_EXT_7TH_OCTAVE 2
+
 #define NUM_SCALE_TYPES 9
 #define SCALE_IONIAN 0      // Major
 #define SCALE_DORIAN 1      // Dorian
@@ -60,18 +65,19 @@ extern bool chordModeMidiNotes[128];
 int chordModeType = 0;              // 0=off, 1=extended, 2=folded
 int scaleType = 0;                  // 0-8: Alle diatonischen Modi + Power Chords
 int diatonicRootKey = 0;            // 0-11 entspricht C-B
+int chordExtensionType = CHORD_EXT_TRIAD; // 0=Triad, 1=7th, 2=7th+8th
 
-const int maxChordNotes = 3;
+const int maxChordNotes = 5;
 
 // Akkordtypen: [Index] = {Semitone offsets}
-const int chordDefinitions[7][3] = {
-  {0, 4, 7},    // 0 = Major
-  {0, 3, 7},    // 1 = Minor
-  {0, 7, -1},   // 2 = Power 5 (ohne 3. Note)
-  {0, 7, 12},   // 3 = Power 8 (mit Oktave)
-  {0, 5, 7},    // 4 = Sus4
-  {0, 4, 8},    // 5 = Augmented
-  {0, 3, 6}     // 6 = Diminished
+const int chordDefinitions[7][5] = {
+  {0, 4, 7, -1, -1},    // 0 = Major
+  {0, 3, 7, -1, -1},    // 1 = Minor
+  {0, 7, -1, -1, -1},   // 2 = Power 5 (ohne 3. Note)
+  {0, 7, 12, -1, -1},   // 3 = Power 8 (mit Oktave)
+  {0, 5, 7, -1, -1},    // 4 = Sus4
+  {0, 4, 8, -1, -1},    // 5 = Augmented
+  {0, 3, 6, -1, -1}     // 6 = Diminished
 };
 
 // Diatonische Akkord-Muster für alle 7 Modi
@@ -153,21 +159,46 @@ int getDiatonicChordType(int switchIndex) {
 }
 
 /**
+ * Hole eine diatonische Akkord-Note (Triad/7th/7th+8th)
+ */
+int getDiatonicChordNote(int switchIndex, int noteIndex) {
+  int noteOffset = (midiNotes[switchIndex] - diatonicRootKey + 12) % 12;
+  int diatonicDegree = -1;
+  for (int i = 0; i < 7; i++) {
+    if (noteOffset == getModeNote(i, scaleType)) {
+      diatonicDegree = i;
+      break;
+    }
+  }
+  if (diatonicDegree == -1) return -1;
+
+  if (chordExtensionType == CHORD_EXT_TRIAD) {
+    if (noteIndex > 2) return -1;
+  } else if (chordExtensionType == CHORD_EXT_7TH) {
+    if (noteIndex > 3) return -1;
+  } else if (chordExtensionType == CHORD_EXT_7TH_OCTAVE) {
+    if (noteIndex == 4) return 12;
+    if (noteIndex > 4) return -1;
+  }
+
+  int degreeStep = noteIndex * 2; // 0,2,4,6
+  int base = getModeNote(diatonicDegree, scaleType);
+  int target = getModeNote(diatonicDegree + degreeStep, scaleType);
+  return target - base;
+}
+
+/**
  * Hole eine Akkord-Note
  */
 int getChordNote(int switchIndex, int variationType, int noteIndex) {
   int chordDefIndex;
-  
-  switch(variationType % 7) {
-    case 0:  // Ionian - Diatonisch
-    case 1:  // Dorian
-    case 2:  // Phrygian
-    case 3:  // Lydian
-    case 4:  // Mixolydian
-    case 5:  // Aeolian
-    case 6:  // Locrian
-      chordDefIndex = getDiatonicChordType(switchIndex);
-      break;
+
+  // Diatonische Modi nutzen immer das diatonische Notes-System
+  if (variationType >= 0 && variationType <= 6) {
+    return getDiatonicChordNote(switchIndex, noteIndex);
+  }
+
+  switch(variationType) {
     case 7:  // Power 5
       chordDefIndex = 2;
       break;
@@ -177,7 +208,7 @@ int getChordNote(int switchIndex, int variationType, int noteIndex) {
     default:
       chordDefIndex = 0;
   }
-  
+
   return chordDefinitions[chordDefIndex][noteIndex];
 }
 
@@ -189,6 +220,7 @@ void initChordMode() {
   for (int i = 0; i < 128; i++) {
     chordModeMidiNotes[i] = false;
   }
+  chordExtensionType = CHORD_EXT_TRIAD;
 }
 
 /**

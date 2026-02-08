@@ -11,7 +11,7 @@ Drücke **Funktionsschalter 2 (A2)** um den Akkord-Modus ein/auszuschalten.
 
 ## Akkord-Definition (Diatonisch in C-Dur)
 
-Die Akkorde folgen den Stufen der C-Dur-Tonleiter. Jede Taste spielt einen Dreiklang bestehend aus Grundnote, Terz und Quinte:
+Die Akkorde folgen den Stufen der C-Dur-Tonleiter. Standardmäßig spielt jede Taste einen Dreiklang bestehend aus Grundnote, Terz und Quinte:
 
 | Taste | Stufe | Akkordtyp | Akkord    | Noten       |
 |-------|-------|-----------|-----------|-------------|
@@ -39,17 +39,32 @@ Die Akkorde folgen den Stufen der C-Dur-Tonleiter. Jede Taste spielt einen Dreik
 3. **Taste halten** → Akkord erklingt, solange die Taste gedrückt ist
 4. **Taste loslassen** → Akkord verstummt
 
+## Chord Extensions (Submenu 2, Seite 3)
+
+Im **FS2-Submenu** (Chord Mode) kann auf Seite 3 der Umfang des Akkords gewählt werden:
+
+- **Index 0: Triad Chords** → Dreiklänge (1-3-5)
+- **Index 1: 7th Chords** → Vierklänge (1-3-5-7)
+- **Index 2: 7th + 8ths Chords** → Fünfklänge inkl. Oktave (1-3-5-7-8)
+
+Die zusätzlichen Töne werden **diatonisch** basierend auf dem gewählten Modus (Submenu 2, Seite 1) berechnet.
+
+## LED-Visualisierung im Akkord/Arp-Modus
+
+Wenn mehrere Noten auf einer LED liegen (z. B. Root und Oktave), wird der Status farblich priorisiert dargestellt:
+
+- **Hell-Weiß (Bright White)**: Die Grundnote (Root) des Akkords spielt gerade.
+- **Hell-Orange (Bright Orange)**: Die 8. Note (Oktave) des Akkords spielt gerade.
+- **Gedimmt-Weiß (Dimmed White)**: Die Noten liegen im Arpeggiator-Pool, werden aber gerade nicht aktiv gespielt.
+
+Es findet **kein Blinken** statt, um eine ruhige und eindeutige Anzeige des aktuell klingenden Tons zu gewährleisten.
+
 ## Anpassung der Akkorde
 
-Um die Akkorde anzupassen, modifiziere das `chords` Array in der Datei `HallKeyboard.ino`:
+Um die Akkorde anzupassen, modifiziere die diatonische Logik in `ChordMode.h`:
 
 ```cpp
-const int chords[NUM_SWITCHES][maxChordNotes] = {
-  {0, 4, 7},  // Switch 0 (C): Major Akkord
-  {0, 3, 7},  // Switch 2 (D): Minor Akkord
-  {0, 3, 6},  // Switch 11 (B): Diminished Akkord
-  // ...
-};
+// Siehe getDiatonicChordNote() und chordDefinitions[]
 ```
 
 ### Akkordtypen (Semitone-Intervalle):

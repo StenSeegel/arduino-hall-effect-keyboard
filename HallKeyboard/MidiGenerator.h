@@ -104,7 +104,7 @@ void handleMidiNoteEvent(int i, bool isTriggered, bool isReleased) {
   int currentNote = getHardwareMIDINote(i);
   
   if (isTriggered) {
-    int notesToPlay[3];
+    int notesToPlay[5];
     int numNotesToPlay = 1;
     
     // 1. Akkord-Berechnung
@@ -114,7 +114,7 @@ void handleMidiNoteEvent(int i, bool isTriggered, bool isReleased) {
       numNotesToPlay = 0;
       for (int j = 0; j < maxChordNotes; j++) {
         int noteOffset = getChordNote(i, scaleType, j);
-        if (noteOffset >= 0 && numNotesToPlay < 3) {
+        if (noteOffset >= 0 && numNotesToPlay < 5) {
           int chordNote = baseNote + noteOffset;
           // Folding logic
           if (isFolded) {
@@ -212,7 +212,7 @@ void handleMidiNoteEvent(int i, bool isTriggered, bool isReleased) {
   }
   
   if (isReleased) {
-    int notesToRelease[3];
+    int notesToRelease[5];
     int numNotesToRelease = 1;
     
     if (chordModeActive && chordModeType != 0) {
@@ -221,7 +221,7 @@ void handleMidiNoteEvent(int i, bool isTriggered, bool isReleased) {
       numNotesToRelease = 0;
       for (int j = 0; j < maxChordNotes; j++) {
         int noteOffset = getChordNote(i, scaleType, j);
-        if (noteOffset >= 0 && numNotesToRelease < 3) {
+        if (noteOffset >= 0 && numNotesToRelease < 5) {
           int chordNote = baseNote + noteOffset;
           if (isFolded) {
             while (chordNote > (currentOctave + 1) * 12) chordNote -= 12;
