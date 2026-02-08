@@ -33,7 +33,7 @@ Das LED-System wechselt intelligent zwischen zwei Ebenen:
 Aktiv, wenn keine Noten gespielt werden oder während der BPM-Priorität (8 Beats nach Tap).
 - **LED 0**: FS1 Status (**Rot** - Play Mode)
 - **LED 2**: FS2 Status (**Gelb** - Chord Mode)
-- **LED 5**: FS3 Status (**Cyan** - Arpeggiator Mode)
+- **LED 5**: FS3 Status (**Magenta** - Arpeggiator Mode)
 - **LED 7**: FS4 Status (**Weiß** - Tap Tempo / Oktav-Anzeige)
 
 ### 2. Performance Layer (Note Layer)
@@ -69,7 +69,7 @@ Ermöglicht das Spielen von diatonischen Akkorden mit einer Taste.
   - **Index 1: 7th** (1-3-5-7).
   - **Index 2: 7th + 8th** (1-3-5-7-8 inkl. Oktave).
 
-### 3. Arpeggiator Mode (FS3 - Cyan)
+### 3. Arpeggiator Mode (FS3 - Magenta)
 Sequenziert gehaltene Noten rhythmisch.
 **Sonderfunktion**: Ein **Long Press auf FS1** im aktiven Arpeggiator-Modus löscht sofort den Arp-Notenspeicher.
 
@@ -91,5 +91,5 @@ Sequenziert gehaltene Noten rhythmisch.
 |-------|-------------|----------------|-------------|
 | **FS1** | Play Mode | Mode Config | Rot |
 | **FS2** | Chord Mode | Scale/Root | Gelb |
-| **FS3** | Arp Mode | Seq/Rate/Duty | Cyan |
+| **FS3** | Arp Mode | Seq/Rate/Duty | Magenta |
 | **FS4** | Tap Tempo | Octave | Weiß |
