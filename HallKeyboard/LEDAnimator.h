@@ -93,32 +93,37 @@ void updateTapTempoLED() {
     return;
   }
 
-  // 1. Sichtbarkeits-Checks (User Requirements)
-  // - Muss Arpeggiator aktiv sein
-  // - Muss im Idle/Hauptmenü sein (isIdle) oder BPM Priority haben
-  
-  if (tapTempo.onBeat()) {
-    lastTapTempoLEDTime = millis();
-    tapTempoLEDState = true;
-    if (bpmPriorityBeats > 0) bpmPriorityBeats--;
+  bool beatHappened = tapTempo.onBeat();
+  if (beatHappened && bpmPriorityBeats > 0) {
+    bpmPriorityBeats--;
   }
 
   // Nur anzeigen wenn Arp aktiv UND (Idle ODER BPM Priority)
-  if (!arpeggiatorActive || (!isIdle && bpmPriorityBeats <= 0)) {
-    // Falls LED an war, ausschalten
+  bool canShow = arpeggiatorActive && (isIdle || bpmPriorityBeats > 0);
+
+  if (!canShow) {
+    // Falls LED noch vom vorherigen Pulse an war, ausmachen
     if (tapTempoLEDState) {
       turnOffLED(7);
       tapTempoLEDState = false;
     }
     return;
   }
-  
+
+  if (beatHappened) {
+    lastTapTempoLEDTime = millis();
+    tapTempoLEDState = true;
+  }
+
   unsigned long currentTime = millis();
   unsigned long beatLength = tapTempo.getBeatLength();
   
   // Wenn kein Tempo gesetzt: LED aus
   if (beatLength <= 0 || beatLength > 5000) {
-    turnOffLED(7);
+    if (tapTempoLEDState) {
+      turnOffLED(7);
+      tapTempoLEDState = false;
+    }
     return;
   }
   
@@ -127,6 +132,11 @@ void updateTapTempoLED() {
   
   if (tapTempoLEDState && timeSinceBeat >= PULSE_DURATION) {
     tapTempoLEDState = false;
+    // Wenn wir nicht im Idle-Mode sind, duerfen wir die LED nicht aktiv AUS schalten,
+    // da sonst die Note Layer (LEDDisplay.h) geflackert wird.
+    if (isIdle) {
+      turnOffLED(7);
+    }
   }
   
   // Farbwahl: MIDI Clock = Cyan, TapTempo = White
@@ -135,7 +145,10 @@ void updateTapTempoLED() {
   if (tapTempoLEDState) {
     setLEDColor(7, colorIdx, 255);
   } else {
-    turnOffLED(7);
+    // Nur im Idle Mode ausschalten. Im Performance Mode ueberlassen wir das dem Note Layer.
+    if (isIdle) {
+       turnOffLED(7);
+    }
   }
 }
 
