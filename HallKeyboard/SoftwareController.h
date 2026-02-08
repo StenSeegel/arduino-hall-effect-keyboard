@@ -979,11 +979,13 @@ void processNoteSwitches() {
     if (switch_released[i]) {
       if (inSubmenu && (currentSubmenu == 1 || currentSubmenu == 3 || currentSubmenu == 4)) {
         // Beim Oktave-Wechsel oder Arp-Menue muessen wir auch die korrekt gespeicherten Noten stoppen
-        int numNotesToRelease = activeSwitchNumNotes[i];
-        for (int n = 0; n < numNotesToRelease; n++) {
-          sendMidiNote(0x90, activeSwitchNotes[i][n], 0x00);
+        if (!holdMode || !heldNotes[i]) {
+          int numNotesToRelease = activeSwitchNumNotes[i];
+          for (int n = 0; n < numNotesToRelease; n++) {
+            sendMidiNote(0x90, activeSwitchNotes[i][n], 0x00);
+          }
+          activeSwitchNumNotes[i] = 0;
         }
-        activeSwitchNumNotes[i] = 0;
       } else {
         int notesToRelease[5];
         int numNotesToRelease = activeSwitchNumNotes[i]; // Nutze gespeicherte Noten
@@ -991,7 +993,11 @@ void processNoteSwitches() {
         for (int n = 0; n < numNotesToRelease; n++) {
           notesToRelease[n] = activeSwitchNotes[i][n];
         }
-        activeSwitchNumNotes[i] = 0; // Speicher leeren
+        
+        // WICHTIG: Speicher nur leeren, wenn HOLD inaktiv oder Note gerade per Toggle ausgeschaltet wurde
+        if (!holdMode || !heldNotes[i]) {
+          activeSwitchNumNotes[i] = 0; // Speicher leeren
+        }
         
         for (int noteIdx = 0; noteIdx < numNotesToRelease; noteIdx++) {
           int noteToRelease = notesToRelease[noteIdx];
@@ -1004,10 +1010,16 @@ void processNoteSwitches() {
         }
         
         if (chordModeActive && chordModeType != CHORD_MODE_OFF) {
-          chordNotesActive[i] = false;
+          if (!holdMode || !heldNotes[i]) {
+            chordNotesActive[i] = false;
+          }
         }
       }
-      setLED(i, false);
+      
+      // LED nur aus, wenn die Note nicht mehr durch Hold gehalten wird
+      if (!heldNotes[i]) {
+        setLED(i, false);
+      }
     }
   }
 }
