@@ -31,11 +31,6 @@ const unsigned long LED_BLINK_INTERVAL = 250;
 unsigned long lastTapTempoLEDTime = 0;
 bool tapTempoLEDState = false;
 
-// Octave Display State
-bool octaveLEDActive = false;
-unsigned long octaveLEDStartTime = 0;
-const unsigned long OCTAVE_LED_DURATION = 800;
-
 // Error LED State
 int errorLEDIndex = -1;
 unsigned long errorLEDStartTime = 0;
@@ -245,14 +240,6 @@ void disableControllerLEDsForNotes() {
     pixels.clear();
     pixels.show();
   }
-}
-
-/**
- * showOctaveLED() - Visual feedback for octave change
- */
-void showOctaveLED(int octave) {
-  // Simple visual feedback: blink the LED corresponding to octave (offset by 1)
-  confirmLED(octave % NUM_SWITCHES);
 }
 
 #endif

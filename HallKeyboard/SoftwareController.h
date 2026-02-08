@@ -124,7 +124,6 @@ extern int bpmPriorityBeats;
 extern void sendMidiNote(int cmd, int pitch, int velocity);
 extern void setLED(int switchIndex, bool on, bool skipLEDs = false);
 extern void confirmLED(int switchIndex);
-extern void showOctaveLED(int octave);
 extern void disableControllerLEDsForNotes();
 extern bool switch_triggered[13];
 extern bool switch_released[13];
@@ -549,9 +548,6 @@ void exitSubmenu(bool saveChanges) {
           int duties[] = {10, 25, 40, 50, 60, 75, 90, 99};
           arpeggiatorDutyCycle = duties[submenuIndex % 8];
         }
-        break;
-      case 4:
-        showOctaveLED(currentOctave);
         break;
     }
   } else {
